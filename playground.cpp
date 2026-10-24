@@ -483,6 +483,9 @@ public:
         QMouseEvent moveStop(QEvent::MouseMove,QPointF(260,60),QPointF(260,60),Qt::NoButton,Qt::LeftButton,Qt::NoModifier);QApplication::sendEvent(&bar,&moveStop);ok=ok&&bar.stops[3].toObject()["position"].toDouble()>.65;
         for(int i=0;i<25;++i)gradientLibrary.append(QJsonObject{{"name",QString("Test %1").arg(i)},{"stops",bar.stops}});
         refreshPalettes();ok=ok&&palette->count()>=30;
+        QMouseEvent deleteStop(QEvent::MouseButtonPress,QPointF(260,60),QPointF(260,60),Qt::RightButton,Qt::RightButton,Qt::NoModifier);QApplication::sendEvent(&bar,&deleteStop);ok=ok&&bar.stops.size()==4;
+        bar.resetMonochrome();ok=ok&&bar.stops.size()==2&&gradientColour(bar.stops,0)==QColor(Qt::black)&&gradientColour(bar.stops,1)==QColor(Qt::white);
+        QMouseEvent keepMinimum(QEvent::MouseButtonPress,QPointF(14,60),QPointF(14,60),Qt::RightButton,Qt::RightButton,Qt::NoModifier);QApplication::sendEvent(&bar,&keepMinimum);ok=ok&&bar.stops.size()==2;
         try{Equation::compile("z; invalid");ok=false;}catch(const std::exception &){}
         if(!ok)qWarning()<<"Playground regression check failed";
         return ok;

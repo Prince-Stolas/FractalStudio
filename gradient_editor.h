@@ -15,14 +15,15 @@ class GradientBar:public QWidget {
     void sort(){QList<QJsonObject> values;QJsonValue chosen=stops[selected];for(auto v:stops)values<<v.toObject();std::sort(values.begin(),values.end(),[](auto a,auto b){return a["position"].toDouble()<b["position"].toDouble();});stops={};for(auto v:values)stops.append(v);for(int i=0;i<stops.size();++i)if(stops[i]==chosen){selected=i;break;}}
 protected:
     void paintEvent(QPaintEvent*)override{QPainter p(this);QRect bar(14,10,width()-28,40);for(int x=0;x<bar.width();++x){p.setPen(gradientColour(stops,double(x)/qMax(1,bar.width()-1)));p.drawLine(bar.left()+x,bar.top(),bar.left()+x,bar.bottom());}p.setPen(Qt::black);p.drawRect(bar);for(int i=0;i<stops.size();++i){int x=14+qRound(stops[i].toObject()["position"].toDouble()*(width()-28));p.setPen(QPen(i==selected?Qt::white:Qt::black,2));p.setBrush(QColor(stops[i].toObject()["colour"].toString()));p.drawPolygon(QPolygon{QPoint(x,53),QPoint(x-7,65),QPoint(x+7,65)});}}
-    void mousePressEvent(QMouseEvent *e)override{selected=nearest(e->position());if(selected<0){stops.append(QJsonObject{{"position",position(e->position())},{"colour",gradientColour(stops,position(e->position())).name()}});selected=stops.size()-1;sort();}dragging=true;update();if(changed)changed();}
+    void mousePressEvent(QMouseEvent *e)override{if(e->button()==Qt::RightButton){dragging=false;selected=nearest(e->position());if(selected>=0)removeSelected();return;}if(e->button()!=Qt::LeftButton)return;selected=nearest(e->position());if(selected<0){stops.append(QJsonObject{{"position",position(e->position())},{"colour",gradientColour(stops,position(e->position())).name()}});selected=stops.size()-1;sort();}dragging=true;update();if(changed)changed();}
     void mouseMoveEvent(QMouseEvent *e)override{if(!dragging||selected<0)return;double value=position(e->position());for(int i=0;i<stops.size();++i)if(i!=selected&&std::abs(stops[i].toObject()["position"].toDouble()-value)<.0001)return;auto stop=stops[selected].toObject();stop["position"]=value;stops[selected]=stop;sort();update();if(changed)changed();}
     void mouseReleaseEvent(QMouseEvent*)override{dragging=false;}
-    void mouseDoubleClickEvent(QMouseEvent*)override{editColour();}
+    void mouseDoubleClickEvent(QMouseEvent *e)override{if(e->button()==Qt::LeftButton)editColour();}
 public:
     QJsonArray stops;
     std::function<void()> changed;
     explicit GradientBar(QWidget *parent=nullptr):QWidget(parent){setMinimumSize(400,80);}
     void editColour(){if(selected<0||selected>=stops.size())return;auto stop=stops[selected].toObject();QColor colour=QColorDialog::getColor(QColor(stop["colour"].toString()),this);if(colour.isValid()){stop["colour"]=colour.name();stops[selected]=stop;update();if(changed)changed();}}
+    void resetMonochrome(){stops={QJsonObject{{"position",0.0},{"colour","#000000"}},QJsonObject{{"position",1.0},{"colour","#ffffff"}}};selected=0;dragging=false;update();if(changed)changed();}
     void removeSelected(){if(stops.size()<=2||selected<0)return;stops.removeAt(selected);selected=0;update();if(changed)changed();}
 };
