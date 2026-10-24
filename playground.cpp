@@ -8,6 +8,7 @@
 #include <complex>
 #include <QOpenGLFramebufferObject>
 #include "workspace.h"
+#include "gradient_editor.h"
 
 // Expressions compile to GLSL rather than being evaluated on the CPU per pixel.
 class Equation {
@@ -64,7 +65,7 @@ struct Settings {
     int iterations=400, palette=0;
     double p=2,bailout=16,frequency=.025,phase=0,smoothing=1;
     QJsonArray gradient={QJsonObject{{"position",0.0},{"colour","#ffffff"}},QJsonObject{{"position",.25},{"colour","#5599ff"}},QJsonObject{{"position",.65},{"colour","#e060bb"}},QJsonObject{{"position",1.0},{"colour","#000000"}}};
-    double whiteUntil=8,blueAt=24;
+    QString gradientName="Default";
     bool orbit=false;int orbitSteps=100;
     Variable variables[4]={{Constant,1,0,"0",int(Qt::ShiftModifier)},
         {Constant,0,0,"0",int(Qt::ControlModifier)},
@@ -81,6 +82,8 @@ public:
     QString lastError;
 private:
     QOpenGLShaderProgram *shader=nullptr;
+    GLuint gradientTexture=0;
+    QJsonArray uploadedGradient;
     GLuint vao=0;QPoint last;bool dragging=false,picking=false,hasPoint=false;
     double px=0,py=0;
     QString expr="cpow(z,dvec2(p,0.0))+c",initial="dvec2(0.0,0.0)";
@@ -103,9 +106,9 @@ uniform dvec2 center,constantC,paramA,paramB,z0;
 uniform double scale,p,bailout;
 uniform vec2 resolution,marker;
 uniform int iterations,aSource,bSource,cSource,palette,showMarker,quadratic;
-uniform float frequency,phase,smoothing,whiteUntil,blueAt;
-uniform int stopCount;uniform float stopPositions[16];uniform vec3 stopColours[16];
-vec3 gradient(float t){vec3 colour=stopColours[0];for(int i=1;i<16;i++){if(i>=stopCount)break;float weight=clamp((t-stopPositions[i-1])/max(stopPositions[i]-stopPositions[i-1],.000001),0.0,1.0);weight=weight*weight*(3.0-2.0*weight);colour=mix(colour,stopColours[i],weight);}return colour;}
+uniform float frequency,phase,smoothing;
+uniform sampler1D gradientTexture;
+vec3 gradient(float t){return texture(gradientTexture,clamp(t,0.0,1.0)).rgb;}
 dvec2 mul(dvec2 a,dvec2 b){return dvec2(a.x*b.x-a.y*b.y,a.x*b.y+a.y*b.x);}
 dvec2 divide(dvec2 a,dvec2 b){return dvec2(dot(a,b),a.y*b.x-a.x*b.y)/dot(b,b);}
 // GLSL double precision has no transcendental overloads on core desktop OpenGL.
@@ -140,16 +143,7 @@ void main(){
  else if(palette==2)rgb=.5+.5*cos(6.2831853*(v+vec3(.50,.32,.10)));
  else rgb=vec3(.5+.5*cos(6.2831853*v));
  rgb*=.8+.2*(1.0-exp(-max(t,0.0)*.06));
- if(palette==4){
-  float progression=max(t-blueAt,0.0)*frequency;
-  vec3 band=.5+.5*cos(6.2831853*(progression+phase+vec3(.50,.32,.10)));
-  vec3 blue=vec3(.35,.65,1.0);
-  band=mix(blue,band,smoothstep(0.0,.5,progression));
-  float age=max(t-1.0,0.0)/float(max(iterations-1,1));
-  rgb=mix(vec3(1),band,smoothstep(whiteUntil,blueAt,t));
-  rgb*=1.0-smoothstep(.65,1.0,age);
- }
- if(palette==5)rgb=gradient(1.0-abs(2.0*fract(v*.5)-1.0));
+ if(palette>=4)rgb=gradient(1.0-abs(2.0*fract(v*.5)-1.0));
  }else if(palette>=4)rgb=vec3(0);
  if(showMarker!=0){vec2 d=abs(gl_FragCoord.xy-marker);if((d.x<1&&d.y<8)||(d.y<1&&d.x<8))rgb=vec3(1);else if((d.x<2&&d.y<9)||(d.y<2&&d.x<9))rgb=vec3(0);}
  frag=vec4(rgb,1);
@@ -187,9 +181,9 @@ protected:
         shader->setUniformValue("aSource",settings.variables[0].source);shader->setUniformValue("bSource",settings.variables[1].source);
         shader->setUniformValue("resolution",QVector2D(w,h));shader->setUniformValue("iterations",settings.iterations);shader->setUniformValue("cSource",settings.variables[2].source);shader->setUniformValue("palette",settings.palette);shader->setUniformValue("frequency",float(settings.frequency));shader->setUniformValue("phase",float(settings.phase));shader->setUniformValue("smoothing",float(settings.smoothing));
         shader->setUniformValue("showMarker",int(hasPoint));shader->setUniformValue("marker",QVector2D(float((px-cx)/span*height()+width()*.5L)*ratio,float((py-cy)/span*height()+height()*.5L)*ratio));
-        shader->setUniformValue("whiteUntil",float(settings.whiteUntil));shader->setUniformValue("blueAt",float(settings.blueAt));
-        shader->setUniformValue("stopCount",int(settings.gradient.size()));
-        for(int i=0;i<settings.gradient.size();++i){auto stop=settings.gradient[i].toObject();QColor colour(stop["colour"].toString());shader->setUniformValue(qPrintable(QString("stopPositions[%1]").arg(i)),float(stop["position"].toDouble()));shader->setUniformValue(qPrintable(QString("stopColours[%1]").arg(i)),QVector3D(colour.redF(),colour.greenF(),colour.blueF()));}
+        if(!gradientTexture)glGenTextures(1,&gradientTexture);
+        glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_1D,gradientTexture);
+        if(uploadedGradient!=settings.gradient){QVector<float> pixels;pixels.reserve(4096*3);for(int i=0;i<4096;++i){QColor colour=gradientColour(settings.gradient,double(i)/4095);pixels<<colour.redF()<<colour.greenF()<<colour.blueF();}glTexImage1D(GL_TEXTURE_1D,0,GL_RGB16F,4096,0,GL_RGB,GL_FLOAT,pixels.constData());glTexParameteri(GL_TEXTURE_1D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_1D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_1D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);uploadedGradient=settings.gradient;}shader->setUniformValue("gradientTexture",0);
         glDrawArrays(GL_TRIANGLES,0,3);shader->release();
         if(exportSize.isEmpty()&&settings.orbit){QPainter painter(this);drawOrbit(painter,size());}
     }
@@ -211,7 +205,7 @@ protected:
     }
 public:
     explicit View(QWidget *parent=nullptr):QOpenGLWidget(parent){setMinimumSize(1,1);setFocusPolicy(Qt::StrongFocus);setMouseTracking(true);}
-    ~View(){if(context()){makeCurrent();delete shader;if(ready)glDeleteVertexArrays(1,&vao);doneCurrent();}}
+    ~View(){if(context()){makeCurrent();delete shader;if(ready){glDeleteVertexArrays(1,&vao);glDeleteTextures(1,&gradientTexture);}doneCurrent();}}
     std::pair<long double,long double> coordinate(QPointF pos)const{return {cx+(pos.x()-width()*.5L)*span/height(),cy+(height()*.5L-pos.y())*span/height()};}
     void reset(){cx=settings.variables[2].source==Pixel?-.5L:0;cy=0;span=3;update();}
     bool apply(){
@@ -271,9 +265,8 @@ public:
 class Playground:public QMainWindow {
 #include "playground_tools.inc"
     View *left,*right;QDockWidget *dock;QComboBox *target,*preset,*palette;QLineEdit *equation;QLabel *error,*coordinates;
-    QDoubleSpinBox *exponent,*bailout,*frequency,*phase,*smoothing;QSpinBox *iterations;QCheckBox *linked;
+    QDoubleSpinBox *exponent,*bailout,*frequency,*phase,*smoothing;QSpinBox *iterations;
     QList<View*> views;
-    QHash<View*,View*> pickLinks;
     int nextNumber=1;
     void viewOperations(){
         QDialog dialog(this);dialog.setWindowTitle("Copy settings / Julia counterpart");dialog.setMinimumWidth(390);QFormLayout form(&dialog);
@@ -282,7 +275,7 @@ class Playground:public QMainWindow {
         destination.setCurrentIndex(views.indexOf(active()));source.setCurrentIndex(active()==views.first()&&views.size()>1?1:0);
         operation.addItems({"Copy all settings","Create Julia counterpart"});
         form.addRow("Source view",&source);form.addRow("Target view",&destination);form.addRow("Operation",&operation);
-        QLabel note("Copy replaces all fractal settings. Julia conversion preserves the target's colours and links picking to the source.");note.setWordWrap(true);form.addRow(&note);
+        QLabel note("Copy replaces all fractal settings. Julia conversion preserves the target's colours and leaves mouse picking local to each view.");note.setWordWrap(true);form.addRow(&note);
         QLabel message;message.setWordWrap(true);form.addRow(&message);
         QDialogButtonBox buttons(QDialogButtonBox::Apply|QDialogButtonBox::Close);form.addRow(&buttons);connect(&buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
         connect(buttons.button(QDialogButtonBox::Apply),&QPushButton::clicked,&dialog,[&]{
@@ -302,15 +295,17 @@ class Playground:public QMainWindow {
         int removedNumber=view->property("number").toInt();
         routes.erase(std::remove_if(routes.begin(),routes.end(),[&](PickRoute r){return r.source==removedNumber||r.target==removedNumber;}),routes.end());
         QJsonArray remainingTracks;for(auto track:tracks)if(track.toObject()["view"].toInt()!=removedNumber)remainingTracks.append(track);tracks=remainingTracks;
-        views.removeOne(view);pickLinks.remove(view);for(auto it=pickLinks.begin();it!=pickLinks.end();){if(it.value()==view)it=pickLinks.erase(it);else ++it;}
+        views.removeOne(view);
         view->setParent(nullptr);delete view;
         if(parent!=root&&parent->count()==1){QWidget *remaining=parent->widget(0);auto *grand=qobject_cast<QSplitter*>(parent->parentWidget());int index=grand->indexOf(parent);remaining->setParent(nullptr);grand->replaceWidget(index,remaining);delete parent;remaining->show();}
+        QHash<int,int> renumber;for(int i=0;i<views.size();++i){renumber[views[i]->property("number").toInt()]=i+1;views[i]->setProperty("number",i+1);}
+        for(auto &route:routes){route.source=renumber.value(route.source);route.target=renumber.value(route.target);}
+        for(int i=0;i<tracks.size();++i){auto track=tracks[i].toObject();track["view"]=renumber.value(track["view"].toInt());tracks[i]=track;}nextNumber=views.size()+1;
         refreshViews(views.first());
     }
     bool copySettings(View *source,View *destination){
         Settings previous=destination->settings;destination->settings=source->settings;
         if(!destination->apply()){destination->settings=previous;error->setText(destination->lastError);return false;}
-        pickLinks.remove(destination);
         if(active()==destination)load();
         return true;
     }
@@ -360,10 +355,10 @@ class Playground:public QMainWindow {
     bool loading=false;
     View *active()const{return views.value(qMax(0,target->currentIndex()),views.first());}
     QDoubleSpinBox *number(double min,double max,int decimals=8){auto *v=new QDoubleSpinBox;v->setRange(min,max);v->setDecimals(decimals);v->setSingleStep(.005);v->setKeyboardTracking(false);return v;}
-    void load(){loading=true;const auto &s=active()->settings;equation->setText(s.equation);exponent->setValue(s.p);bailout->setValue(s.bailout);iterations->setValue(s.iterations);palette->setCurrentIndex(s.palette);frequency->setValue(s.frequency);phase->setValue(s.phase);smoothing->setValue(s.smoothing);
+    void load(){loading=true;const auto &s=active()->settings;equation->setText(s.equation);exponent->setValue(s.p);bailout->setValue(s.bailout);iterations->setValue(s.iterations);palette->setCurrentIndex(s.palette==5?qMax(5,palette->findText(s.gradientName)):s.palette);frequency->setValue(s.frequency);phase->setValue(s.phase);smoothing->setValue(s.smoothing);
         for(int i=0;i<4;++i){const auto &v=s.variables[i];auto &u=controls[i];u.source->setCurrentIndex(v.source);u.real->setValue(v.real);u.imag->setValue(v.imag);u.expression->setText(v.equation);u.modifier->setCurrentIndex(u.modifier->findData(v.modifiers));visibility(i);}loading=false;
     }
-    void apply(){if(loading)return;auto &s=active()->settings;s.equation=equation->text();s.p=exponent->value();s.bailout=bailout->value();s.iterations=iterations->value();s.palette=palette->currentIndex();s.frequency=frequency->value();s.phase=phase->value();s.smoothing=smoothing->value();
+    void apply(){if(loading)return;auto &s=active()->settings;s.equation=equation->text();s.p=exponent->value();s.bailout=bailout->value();s.iterations=iterations->value();s.palette=qMin(5,palette->currentIndex());if(palette->currentIndex()>=5&&palette->currentIndex()-5<gradientLibrary.size()){auto entry=gradientLibrary[palette->currentIndex()-5].toObject();s.gradientName=entry["name"].toString();s.gradient=entry["stops"].toArray();}s.frequency=frequency->value();s.phase=phase->value();s.smoothing=smoothing->value();
         for(int i=0;i<4;++i){auto &v=s.variables[i];auto &u=controls[i];v.source=u.source->currentIndex();v.real=u.real->value();v.imag=u.imag->value();v.equation=u.expression->text();v.modifiers=u.modifier->currentData().toInt();}
         error->setText(active()->apply()?"":active()->lastError);
     }
@@ -377,20 +372,17 @@ class Playground:public QMainWindow {
             if(QRegularExpression("\\bpixel\\b").match(Equation::compile(source->settings.equation)).hasMatch())throw std::runtime_error("Use c rather than pixel in the source recurrence so it can become a constant Julia parameter.");
             Settings previous=destination->settings;
             destination->settings=source->settings;
-            auto &s=destination->settings;s.palette=previous.palette;s.frequency=previous.frequency;s.phase=previous.phase;s.smoothing=previous.smoothing;s.gradient=previous.gradient;s.whiteUntil=previous.whiteUntil;s.blueAt=previous.blueAt;
+            auto &s=destination->settings;s.palette=previous.palette;s.frequency=previous.frequency;s.phase=previous.phase;s.smoothing=previous.smoothing;s.gradient=previous.gradient;s.gradientName=previous.gradientName;
             s.variables[3].source=Pixel;s.variables[2]=previous.variables[2];s.variables[2].source=Mouse;
             if(!destination->apply()){destination->settings=previous;throw std::runtime_error(destination->lastError.toStdString());}
-            pickLinks[destination]=source;linked->setChecked(true);destination->reset();target->setCurrentIndex(views.indexOf(destination));load();error->clear();return true;
+            destination->reset();target->setCurrentIndex(views.indexOf(destination));load();error->clear();return true;
         }catch(const std::exception &e){error->setText(e.what());return false;}
     }
     void picked(View *source,double x,double y,Qt::KeyboardModifiers modifiers){
         int flags=int(modifiers&(Qt::ShiftModifier|Qt::ControlModifier|Qt::AltModifier));bool routed=false;
         for(auto route:routes)if(route.source==source->property("number").toInt()&&route.modifiers==flags){if(auto *dest=byNumber(route.target)){auto &v=dest->settings.variables[route.variable];v.source=Mouse;v.real=x;v.imag=y;dest->apply();if(active()==dest)load();routed=true;}}
         if(routed)return;
-        QList<View*> destinations;
-        if(linked->isChecked()){for(auto *view:views)if(pickLinks.value(view)==source)destinations<<view;}
-        if(destinations.isEmpty())destinations<<source;
-        for(auto *dest:destinations)pickInto(dest,x,y,modifiers);
+        pickInto(source,x,y,modifiers);
     }
     void pickInto(View *dest,double x,double y,Qt::KeyboardModifiers modifiers){
         int flags=int(modifiers&(Qt::ShiftModifier|Qt::ControlModifier|Qt::AltModifier));
@@ -406,7 +398,7 @@ public:
         setWindowTitle("Fractal Playground");resize(1420,900);
         auto *container=new QWidget;auto *layout=new QVBoxLayout(container);layout->setContentsMargins(0,0,0,0);layout->setSpacing(0);
         container->setStyleSheet("QSplitter::handle { background: black; }");
-        root=new QSplitter;root->setHandleWidth(1);root->setChildrenCollapsible(false);left=new View;right=new View;right->settings.variables[2].source=Mouse;right->settings.variables[3].source=Pixel;right->cx=0;right->apply();root->addWidget(left);root->addWidget(right);views={left,right};for(auto *view:views)view->setProperty("number",nextNumber++);pickLinks[right]=left;layout->addWidget(root);setCentralWidget(container);
+        root=new QSplitter;root->setHandleWidth(1);root->setChildrenCollapsible(false);left=new View;right=new View;right->settings.variables[2].source=Mouse;right->settings.variables[3].source=Pixel;right->cx=0;right->apply();root->addWidget(left);root->addWidget(right);views={left,right};for(auto *view:views)view->setProperty("number",nextNumber++);layout->addWidget(root);setCentralWidget(container);
         dock=new QDockWidget("Playground settings",this);dock->setAllowedAreas(Qt::LeftDockWidgetArea|Qt::RightDockWidgetArea);dock->setMinimumWidth(320);auto *scroll=new QScrollArea;scroll->setWidgetResizable(true);auto *body=new QWidget;auto *form=new QFormLayout(body);form->setSpacing(10);scroll->setWidget(body);dock->setWidget(scroll);addDockWidget(Qt::RightDockWidgetArea,dock);
         toolbar=addToolBar("View");toolbar->setMovable(false);toolbar->addAction(dock->toggleViewAction());auto *reset=toolbar->addAction("Reset active view");connect(reset,&QAction::triggered,this,[this]{active()->reset();});
         auto *panesButton=new QToolButton;panesButton->setText("Layout / Fullscreen");panesButton->setPopupMode(QToolButton::InstantPopup);auto *menu=new QMenu(panesButton);panesButton->setMenu(menu);toolbar->addWidget(panesButton);
@@ -419,7 +411,6 @@ public:
         auto *full=new QShortcut(QKeySequence(Qt::Key_F11),this);connect(full,&QShortcut::activated,this,[this]{if(fullscreenMode)leaveFullscreen();else enterFullscreen(true);});
         auto *all=new QShortcut(QKeySequence(Qt::CTRL|Qt::Key_F11),this);connect(all,&QShortcut::activated,this,[this]{if(fullscreenMode)leaveFullscreen();else enterFullscreen(false);});
         menu->addAction("Remove active view",this,[this]{removeView();});
-        linked=new QCheckBox("Link Julia picking");linked->setChecked(true);toolbar->addWidget(linked);
         auto *shortcut=new QShortcut(QKeySequence(Qt::Key_Tab),this);connect(shortcut,&QShortcut::activated,this,[this]{dock->setVisible(!dock->isVisible());});
         target=new QComboBox;target->addItems({"View 1","View 2"});form->addRow("Edit",target);connect(target,&QComboBox::currentIndexChanged,this,[this]{load();});
         toolbar->addAction("Copy / Julia…",this,[this]{viewOperations();});
@@ -435,11 +426,11 @@ public:
             auto *item=form->itemAt(row,QFormLayout::FieldRole);
             if(item){if(auto *numeric=qobject_cast<QAbstractSpinBox*>(item->widget())){form->removeWidget(numeric);form->setWidget(row,QFormLayout::FieldRole,new NumericSlider(numeric));}}
         }
-        auto *help=new QLabel("<b>Numeric sliders</b><br>Press ↔ next to any number to enable a slider and set its minimum and maximum. Typed values remain available.<br><br><b>Equation language</b><br>z or z_n: current iterate<br>pixel: point in this view<br>a, b, c: independently selected sources<br>p: exponent · n: iteration (starts at 0)<br>a, b: editable complex parameters · i · pi<br>Operators: + − * / ^ and parentheses<br>Functions: sin, cos, exp, log, conj, abs, norm<br>abs is component-wise; norm is magnitude.<br><br><b>Navigation</b><br>Drag left: pan · wheel: zoom at cursor<br>Right-click/drag: pick variables in Mouse mode<br>Each variable has configurable Shift/Ctrl/Alt modifiers.<br>With Julia linking enabled, picks update all Julia views linked to the picked source; otherwise they update the local view.<br>Initial z has its own source dropdown; Equation mode accepts a, b, c and pixel.<br>Home: reset focused view · Tab: sidebar<br><br>There is no zoom cap. Numerical precision eventually limits detail. Double precision is used for arithmetic; transcendental functions use float precision.<br><br>Presets are editable equations, not separate renderers. Escape-time colouring is used for all formulas; convergent formulas may need different bailout settings.");help->setWordWrap(true);help->setTextFormat(Qt::RichText);form->addRow(help);
+        auto *help=new QLabel("<b>Numeric sliders</b><br>Press ↔ next to any number to enable a slider and set its minimum and maximum. Typed values remain available.<br><br><b>Equation language</b><br>z or z_n: current iterate<br>pixel: point in this view<br>a, b, c: independently selected sources<br>p: exponent · n: iteration (starts at 0)<br>a, b: editable complex parameters · i · pi<br>Operators: + − * / ^ and parentheses<br>Functions: sin, cos, exp, log, conj, abs, norm<br>abs is component-wise; norm is magnitude.<br><br><b>Navigation</b><br>Drag left: pan · wheel: zoom at cursor<br>Right-click/drag: pick variables in Mouse mode<br>Each variable has configurable Shift/Ctrl/Alt modifiers.<br>Mouse-picked variables use only their own view. Cross-view picking requires an explicit Picking links route.<br>Initial z has its own source dropdown; Equation mode accepts a, b, c and pixel.<br>Home: reset focused view · Tab: sidebar<br><br>There is no zoom cap. Numerical precision eventually limits detail. Double precision is used for arithmetic; transcendental functions use float precision.<br><br>Presets are editable equations, not separate renderers. Escape-time colouring is used for all formulas; convergent formulas may need different bailout settings.");help->setWordWrap(true);help->setTextFormat(Qt::RichText);form->addRow(help);
         coordinates=new QLabel("Click a point to inspect its complex coordinate");statusBar()->addWidget(coordinates,1);
         for(auto *v:{exponent,bailout,frequency,phase,smoothing})connect(v,&QDoubleSpinBox::valueChanged,this,[this]{apply();});
         connect(iterations,&QSpinBox::valueChanged,this,[this]{apply();});connect(palette,&QComboBox::currentIndexChanged,this,[this]{apply();});
-        bindView(left);bindView(right);load();setupTools();QTimer::singleShot(0,this,[this]{balance();});
+        bindView(left);bindView(right);load();initGradients();setupTools();QTimer::singleShot(0,this,[this]{balance();});
     }
     bool smoke(){
         auto *realTest=new QDoubleSpinBox;realTest->setRange(-10,10);realTest->setDecimals(8);
@@ -450,13 +441,13 @@ public:
         target->setCurrentIndex(0);left->settings=Settings();left->settings.equation="conj(z)^p+c+a";load();
         ok=makeJulia(left,right)&&ok;
         ok=ok&&right->settings.equation==left->settings.equation&&right->settings.variables[3].source==Pixel&&right->settings.variables[2].source==Mouse;
-        picked(left,-.75,.1,Qt::NoModifier);ok=ok&&right->settings.variables[2].real==-.75;
+        picked(right,-.75,.1,Qt::NoModifier);ok=ok&&right->settings.variables[2].real==-.75;
         for(int i=0;i<4;++i){right->settings.variables[i].source=Mouse;}
-        picked(left,.125,-.25,Qt::AltModifier);ok=ok&&right->settings.variables[3].real==.125&&right->settings.variables[3].imag==-.25;
-        picked(left,.2,.3,Qt::ShiftModifier);ok=ok&&right->settings.variables[0].real==.2;
-        picked(left,.4,.5,Qt::ControlModifier);ok=ok&&right->settings.variables[1].imag==.5;
+        picked(right,.125,-.25,Qt::AltModifier);ok=ok&&right->settings.variables[3].real==.125&&right->settings.variables[3].imag==-.25;
+        picked(right,.2,.3,Qt::ShiftModifier);ok=ok&&right->settings.variables[0].real==.2;
+        picked(right,.4,.5,Qt::ControlModifier);ok=ok&&right->settings.variables[1].imag==.5;
         right->settings.variables[0].modifiers=int(Qt::ShiftModifier|Qt::AltModifier);
-        picked(left,.6,.7,Qt::ShiftModifier|Qt::AltModifier);ok=ok&&right->settings.variables[0].real==.6;
+        picked(right,.6,.7,Qt::ShiftModifier|Qt::AltModifier);ok=ok&&right->settings.variables[0].real==.6;
         right->settings.variables[3].source=Expression;right->settings.variables[3].equation="a+b*c";ok=right->apply()&&ok;
         for(int i=0;i<3;++i){right->settings.variables[i].source=Pixel;}ok=right->apply()&&ok;right->update();
         left->settings.variables[3].source=Pixel;ok=!makeJulia(left,right)&&ok;
@@ -485,6 +476,13 @@ public:
         auto multi=snapshot();ok=restore(multi)&&ok;ok=ok&&views.size()==2&&routes.size()==1&&tracks.size()==2;
         QSaveFile workspace(temporary.filePath("workspace.json"));ok=workspace.open(QIODevice::WriteOnly)&&ok;workspace.write(QJsonDocument(multi).toJson());ok=workspace.commit()&&ok;
         active()->renderImage({64,64});
+        for(int i=0;i<views.size();++i)ok=ok&&views[i]->property("number").toInt()==i+1;
+        target->setCurrentIndex(0);removeView();ok=ok&&views.first()->property("number").toInt()==1;splitView(Qt::Horizontal);ok=ok&&active()->property("number").toInt()==2;
+        routes.clear();views[0]->settings.variables[2].source=Mouse;views[1]->settings.variables[2].source=Mouse;views[1]->settings.variables[2].real=.123;picked(views[0],.9,.8,Qt::NoModifier);ok=ok&&views[0]->settings.variables[2].real==.9&&views[1]->settings.variables[2].real==.123;
+        GradientBar bar;bar.resize(400,80);bar.stops=Settings().gradient;QMouseEvent addStop(QEvent::MouseButtonPress,QPointF(200,30),QPointF(200,30),Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);QApplication::sendEvent(&bar,&addStop);ok=ok&&bar.stops.size()==5;
+        QMouseEvent moveStop(QEvent::MouseMove,QPointF(260,60),QPointF(260,60),Qt::NoButton,Qt::LeftButton,Qt::NoModifier);QApplication::sendEvent(&bar,&moveStop);ok=ok&&bar.stops[3].toObject()["position"].toDouble()>.65;
+        for(int i=0;i<25;++i)gradientLibrary.append(QJsonObject{{"name",QString("Test %1").arg(i)},{"stops",bar.stops}});
+        refreshPalettes();ok=ok&&palette->count()>=30;
         try{Equation::compile("z; invalid");ok=false;}catch(const std::exception &){}
         if(!ok)qWarning()<<"Playground regression check failed";
         return ok;
