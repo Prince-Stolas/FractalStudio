@@ -380,7 +380,7 @@ class Playground:public QMainWindow {
     }
     void picked(View *source,double x,double y,Qt::KeyboardModifiers modifiers){
         int flags=int(modifiers&(Qt::ShiftModifier|Qt::ControlModifier|Qt::AltModifier));bool routed=false;
-        for(auto route:routes)if(route.source==source->property("number").toInt()&&route.modifiers==flags){if(auto *dest=byNumber(route.target)){auto &v=dest->settings.variables[route.variable];v.source=Mouse;v.real=x;v.imag=y;dest->apply();if(active()==dest)load();routed=true;}}
+        for(auto route:routes)if(route.source==source->property("number").toInt()&&route.modifiers==flags){if(auto *dest=byNumber(route.target)){auto &v=dest->settings.variables[route.variable];if(v.source==Pixel)v.source=Constant;v.real=x;v.imag=y;dest->apply();if(active()==dest)load();routed=true;}}
         if(routed)return;
         pickInto(source,x,y,modifiers);
     }
@@ -473,6 +473,9 @@ public:
         QMouseEvent orbitClick(QEvent::MouseButtonPress,QPointF(20,20),QPointF(20,20),Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);QApplication::sendEvent(active(),&orbitClick);
         active()->renderImage({96,96});active()->update();
         splitView(Qt::Horizontal);View *routeSource=views.first(),*routeTarget=views.last();routes<<PickRoute{routeSource->property("number").toInt(),routeTarget->property("number").toInt(),1,int(Qt::AltModifier)};picked(routeSource,.42,-.13,Qt::AltModifier);ok=ok&&routeTarget->settings.variables[1].real==.42;
+        for(int mode:{int(Constant),int(Mouse),int(Pixel)}){routeTarget->settings.variables[1].source=mode;picked(routeSource,.31,.27,Qt::AltModifier);ok=ok&&routeTarget->settings.variables[1].source==(mode==Pixel?Constant:mode);}
+        routeTarget->settings.variables[1].source=Constant;picked(routeSource,.42,-.13,Qt::AltModifier);picked(routeTarget,.99,.88,Qt::ControlModifier);ok=ok&&routeTarget->settings.variables[1].real==.42;
+        routes.last().variable=3;routeTarget->settings.variables[3].source=Expression;routeTarget->settings.variables[3].equation="a+b";picked(routeSource,.2,.1,Qt::AltModifier);ok=ok&&routeTarget->settings.variables[3].source==Expression;routes.last().variable=1;
         auto multi=snapshot();ok=restore(multi)&&ok;ok=ok&&views.size()==2&&routes.size()==1&&tracks.size()==2;
         QSaveFile workspace(temporary.filePath("workspace.json"));ok=workspace.open(QIODevice::WriteOnly)&&ok;workspace.write(QJsonDocument(multi).toJson());ok=workspace.commit()&&ok;
         active()->renderImage({64,64});
