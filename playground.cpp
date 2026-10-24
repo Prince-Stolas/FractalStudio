@@ -362,7 +362,7 @@ class Playground:public QMainWindow {
         for(int i=0;i<4;++i){auto &v=s.variables[i];auto &u=controls[i];v.source=u.source->currentIndex();v.real=u.real->value();v.imag=u.imag->value();v.equation=u.expression->text();v.modifiers=u.modifier->currentData().toInt();}
         error->setText(active()->apply()?"":active()->lastError);
     }
-    void choosePreset(int index){if(loading)return;auto &s=active()->settings;s=Settings();switch(index){case 1:s.variables[3].source=Pixel;s.variables[2].source=Mouse;break;case 2:s.equation="abs(z)^p+c";break;case 3:s.equation="conj(z)^p+c";break;case 4:s.p=3;break;case 5:s.equation="sin(z)*a+c";s.variables[3].source=Pixel;s.variables[2].source=Mouse;break;}load();apply();active()->reset();}
+    void choosePreset(int index){if(loading)return;auto &s=active()->settings;Settings previous=s;s=Settings();s.palette=previous.palette;s.frequency=previous.frequency;s.phase=previous.phase;s.smoothing=previous.smoothing;s.gradient=previous.gradient;s.gradientName=previous.gradientName;switch(index){case 1:s.variables[3].source=Pixel;s.variables[2].source=Mouse;break;case 2:s.equation="abs(z)^p+c";break;case 3:s.equation="conj(z)^p+c";break;case 4:s.p=3;break;case 5:s.equation="sin(z)*a+c";s.variables[3].source=Pixel;s.variables[2].source=Mouse;break;}load();apply();active()->reset();}
     bool makeJulia(View *source,View *destination){
         if(source==destination){error->setText("Choose different source and target views.");return false;}
         if(active()==source){apply();if(!error->text().isEmpty())return false;}
@@ -489,6 +489,9 @@ public:
         ok=bar.setSelectedPosition(.5)&&ok;ok=ok&&bar.selectedPosition()==.5;
         ok=!bar.setSelectedPosition(1)&&ok;ok=ok&&bar.selectedPosition()==.5;
         bar.setStops(Settings().gradient);ok=ok&&bar.selectedPosition()==0;
+        active()->settings.palette=5;active()->settings.gradientName=gradientLibrary.last().toObject()["name"].toString();active()->settings.gradient=gradientLibrary.last().toObject()["stops"].toArray();active()->settings.frequency=.12;active()->settings.phase=.34;active()->settings.smoothing=.56;
+        Settings appearance=active()->settings;
+        for(int presetIndex=0;presetIndex<6;++presetIndex){choosePreset(presetIndex);const auto &s=active()->settings;ok=ok&&s.palette==appearance.palette&&s.gradientName==appearance.gradientName&&s.gradient==appearance.gradient&&s.frequency==appearance.frequency&&s.phase==appearance.phase&&s.smoothing==appearance.smoothing;}
         try{Equation::compile("z; invalid");ok=false;}catch(const std::exception &){}
         if(!ok)qWarning()<<"Playground regression check failed";
         return ok;
