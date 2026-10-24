@@ -105,7 +105,7 @@ uniform vec2 resolution,marker;
 uniform int iterations,aSource,bSource,cSource,palette,showMarker,quadratic;
 uniform float frequency,phase,smoothing,whiteUntil,blueAt;
 uniform int stopCount;uniform float stopPositions[16];uniform vec3 stopColours[16];
-vec3 gradient(float t){vec3 colour=stopColours[0];for(int i=1;i<16;i++){if(i>=stopCount)break;float weight=clamp((t-stopPositions[i-1])/max(stopPositions[i]-stopPositions[i-1],.000001),0.0,1.0);colour=mix(colour,stopColours[i],weight);}return colour;}
+vec3 gradient(float t){vec3 colour=stopColours[0];for(int i=1;i<16;i++){if(i>=stopCount)break;float weight=clamp((t-stopPositions[i-1])/max(stopPositions[i]-stopPositions[i-1],.000001),0.0,1.0);weight=weight*weight*(3.0-2.0*weight);colour=mix(colour,stopColours[i],weight);}return colour;}
 dvec2 mul(dvec2 a,dvec2 b){return dvec2(a.x*b.x-a.y*b.y,a.x*b.y+a.y*b.x);}
 dvec2 divide(dvec2 a,dvec2 b){return dvec2(dot(a,b),a.y*b.x-a.x*b.y)/dot(b,b);}
 // GLSL double precision has no transcendental overloads on core desktop OpenGL.
@@ -149,7 +149,7 @@ void main(){
   rgb=mix(vec3(1),band,smoothstep(whiteUntil,blueAt,t));
   rgb*=1.0-smoothstep(.65,1.0,age);
  }
- if(palette==5)rgb=gradient(fract(v));
+ if(palette==5)rgb=gradient(1.0-abs(2.0*fract(v*.5)-1.0));
  }else if(palette>=4)rgb=vec3(0);
  if(showMarker!=0){vec2 d=abs(gl_FragCoord.xy-marker);if((d.x<1&&d.y<8)||(d.y<1&&d.x<8))rgb=vec3(1);else if((d.x<2&&d.y<9)||(d.y<2&&d.x<9))rgb=vec3(0);}
  frag=vec4(rgb,1);
@@ -473,7 +473,7 @@ public:
         active()->settings=Settings();active()->settings.palette=5;active()->apply();
         QImage exported=active()->renderImage({320,240});ok=ok&&exported.size()==QSize(320,240);
         QTemporaryDir temporary;QString imagePath=temporary.filePath("test.png");ok=ok&&exported.save(imagePath,"PNG")&&QImage(imagePath).size()==QSize(320,240);
-        auto saved=snapshot();ok=restore(saved)&&ok;ok=ok&&active()->settings.palette==5&&views.size()==1;
+        animationFps=120;auto saved=snapshot();ok=restore(saved)&&ok;ok=ok&&animationFps==120;ok=ok&&active()->settings.palette==5&&views.size()==1;
         auto bad=saved;bad["version"]=99;ok=!restore(bad)&&ok;
         int id=active()->property("number").toInt();tracks={QJsonObject{{"view",id},{"parameter",12},{"time",0.0},{"value",0.0}},QJsonObject{{"view",id},{"parameter",12},{"time",2.0},{"value",1.0}}};animateAt(1);ok=ok&&std::abs(active()->settings.phase-.5)<1e-9;
         history.clear();historyIndex=-1;checkpoint();active()->settings.phase=.75;checkpoint();travel(-1);ok=ok&&std::abs(active()->settings.phase-.5)<1e-9;travel(1);ok=ok&&std::abs(active()->settings.phase-.75)<1e-9;
