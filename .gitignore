@@ -1,0 +1,7 @@
+build*/
+*.exe
+*.dll
+*.o
+*.obj
+.env
+.env.*
