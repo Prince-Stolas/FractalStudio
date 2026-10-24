@@ -5,6 +5,9 @@
 #include <cmath>
 #include <functional>
 #include <stdexcept>
+#include <complex>
+#include <QOpenGLFramebufferObject>
+#include "workspace.h"
 
 // Expressions compile to GLSL rather than being evaluated on the CPU per pixel.
 class Equation {
@@ -60,6 +63,9 @@ struct Settings {
     QString equation="z^p+c";
     int iterations=400, palette=0;
     double p=2,bailout=16,frequency=.025,phase=0,smoothing=1;
+    QJsonArray gradient={QJsonObject{{"position",0.0},{"colour","#ffffff"}},QJsonObject{{"position",.25},{"colour","#5599ff"}},QJsonObject{{"position",.65},{"colour","#e060bb"}},QJsonObject{{"position",1.0},{"colour","#000000"}}};
+    double whiteUntil=8,blueAt=24;
+    bool orbit=false;int orbitSteps=100;
     Variable variables[4]={{Constant,1,0,"0",int(Qt::ShiftModifier)},
         {Constant,0,0,"0",int(Qt::ControlModifier)},
         {Pixel,-.745,.186,"0",0},{Constant,0,0,"0",int(Qt::AltModifier)}};
@@ -79,13 +85,27 @@ private:
     double px=0,py=0;
     QString expr="cpow(z,dvec2(p,0.0))+c",initial="dvec2(0.0,0.0)";
     bool ready=false;
+    QSize exportSize;
+    void drawOrbit(QPainter &painter,QSize size){
+        if(!settings.orbit||!hasPoint)return;
+        using C=std::complex<double>;C pixel(px,py),z(0);int iteration=0;
+        auto value=[&](QString name)->C{if(name=="z"||name=="z_n")return z;if(name=="pixel")return pixel;if(name=="p")return C(settings.p);if(name=="n")return C(iteration);int index=name=="a"?0:name=="b"?1:name=="c"?2:-1;if(index<0)throw std::runtime_error("Unknown variable");const auto &v=settings.variables[index];return v.source==Pixel?pixel:C(v.real,v.imag);};
+        const auto &start=settings.variables[3];
+        try{z=start.source==Pixel?pixel:start.source==Expression?ComplexExpression::evaluate(start.equation,value):C(start.real,start.imag);
+            auto screen=[&](C point){return QPointF(double((point.real()-cx)/span*size.height()+size.width()*.5L),double((cy-point.imag())/span*size.height()+size.height()*.5L));};
+            painter.setRenderHint(QPainter::Antialiasing);painter.setPen(QPen(QColor("#ffeb55"),1.5));
+            for(iteration=0;iteration<settings.orbitSteps;++iteration){C next=ComplexExpression::evaluate(settings.equation,value);if(!std::isfinite(next.real())||!std::isfinite(next.imag()))break;QPointF a=screen(z),b=screen(next);if(std::abs(a.x())<1e7&&std::abs(a.y())<1e7&&std::abs(b.x())<1e7&&std::abs(b.y())<1e7){painter.drawLine(a,b);painter.drawEllipse(b,2,2);}z=next;if(std::abs(z)>settings.bailout)break;}
+        }catch(const std::exception &e){if(status)status(e.what());}
+    }
     QString fragment()const{return QString(R"GLSL(#version 400 core
 out vec4 frag;
 uniform dvec2 center,constantC,paramA,paramB,z0;
 uniform double scale,p,bailout;
 uniform vec2 resolution,marker;
 uniform int iterations,aSource,bSource,cSource,palette,showMarker,quadratic;
-uniform float frequency,phase,smoothing;
+uniform float frequency,phase,smoothing,whiteUntil,blueAt;
+uniform int stopCount;uniform float stopPositions[16];uniform vec3 stopColours[16];
+vec3 gradient(float t){vec3 colour=stopColours[0];for(int i=1;i<16;i++){if(i>=stopCount)break;float weight=clamp((t-stopPositions[i-1])/max(stopPositions[i]-stopPositions[i-1],.000001),0.0,1.0);colour=mix(colour,stopColours[i],weight);}return colour;}
 dvec2 mul(dvec2 a,dvec2 b){return dvec2(a.x*b.x-a.y*b.y,a.x*b.y+a.y*b.x);}
 dvec2 divide(dvec2 a,dvec2 b){return dvec2(dot(a,b),a.y*b.x-a.x*b.y)/dot(b,b);}
 // GLSL double precision has no transcendental overloads on core desktop OpenGL.
@@ -121,15 +141,16 @@ void main(){
  else rgb=vec3(.5+.5*cos(6.2831853*v));
  rgb*=.8+.2*(1.0-exp(-max(t,0.0)*.06));
  if(palette==4){
-  float progression=max(t-24.0,0.0)*frequency;
+  float progression=max(t-blueAt,0.0)*frequency;
   vec3 band=.5+.5*cos(6.2831853*(progression+phase+vec3(.50,.32,.10)));
   vec3 blue=vec3(.35,.65,1.0);
   band=mix(blue,band,smoothstep(0.0,.5,progression));
   float age=max(t-1.0,0.0)/float(max(iterations-1,1));
-  rgb=mix(vec3(1),band,smoothstep(8.0,24.0,t));
+  rgb=mix(vec3(1),band,smoothstep(whiteUntil,blueAt,t));
   rgb*=1.0-smoothstep(.65,1.0,age);
  }
- }else if(palette==4)rgb=vec3(0);
+ if(palette==5)rgb=gradient(fract(v));
+ }else if(palette>=4)rgb=vec3(0);
  if(showMarker!=0){vec2 d=abs(gl_FragCoord.xy-marker);if((d.x<1&&d.y<8)||(d.y<1&&d.x<8))rgb=vec3(1);else if((d.x<2&&d.y<9)||(d.y<2&&d.x<9))rgb=vec3(0);}
  frag=vec4(rgb,1);
 })GLSL").arg(initial,expr);}
@@ -157,7 +178,7 @@ protected:
     void paintGL()override{
         glClearColor(.016f,.020f,.034f,1);glClear(GL_COLOR_BUFFER_BIT);if(!shader)return;
         shader->bind();glBindVertexArray(vao);
-        float ratio=float(devicePixelRatioF());float w=width()*ratio,h=height()*ratio;glViewport(0,0,int(w),int(h));
+        float ratio=float(devicePixelRatioF());float w=exportSize.isEmpty()?width()*ratio:exportSize.width(),h=exportSize.isEmpty()?height()*ratio:exportSize.height();glViewport(0,0,int(w),int(h));
         const bool quadratic=expr=="(cpow(z,dvec2(p,0.0))+c)"&&initial=="dvec2(0.0,0.0)"&&settings.p==2&&settings.variables[2].source==Pixel&&settings.bailout>=2;
         shader->setUniformValue("quadratic",int(quadratic));
         uniform2("center",double(cx),double(cy));uniform("scale",double(span));uniform("p",settings.p);uniform("bailout",settings.bailout);
@@ -166,7 +187,11 @@ protected:
         shader->setUniformValue("aSource",settings.variables[0].source);shader->setUniformValue("bSource",settings.variables[1].source);
         shader->setUniformValue("resolution",QVector2D(w,h));shader->setUniformValue("iterations",settings.iterations);shader->setUniformValue("cSource",settings.variables[2].source);shader->setUniformValue("palette",settings.palette);shader->setUniformValue("frequency",float(settings.frequency));shader->setUniformValue("phase",float(settings.phase));shader->setUniformValue("smoothing",float(settings.smoothing));
         shader->setUniformValue("showMarker",int(hasPoint));shader->setUniformValue("marker",QVector2D(float((px-cx)/span*height()+width()*.5L)*ratio,float((py-cy)/span*height()+height()*.5L)*ratio));
+        shader->setUniformValue("whiteUntil",float(settings.whiteUntil));shader->setUniformValue("blueAt",float(settings.blueAt));
+        shader->setUniformValue("stopCount",int(settings.gradient.size()));
+        for(int i=0;i<settings.gradient.size();++i){auto stop=settings.gradient[i].toObject();QColor colour(stop["colour"].toString());shader->setUniformValue(qPrintable(QString("stopPositions[%1]").arg(i)),float(stop["position"].toDouble()));shader->setUniformValue(qPrintable(QString("stopColours[%1]").arg(i)),QVector3D(colour.redF(),colour.greenF(),colour.blueF()));}
         glDrawArrays(GL_TRIANGLES,0,3);shader->release();
+        if(exportSize.isEmpty()&&settings.orbit){QPainter painter(this);drawOrbit(painter,size());}
     }
     void mousePressEvent(QMouseEvent *e)override{setFocus();if(activated)activated();last=e->position().toPoint();dragging=e->button()==Qt::LeftButton;picking=e->button()==Qt::RightButton;inspect(e->position(),picking);}
     void mouseMoveEvent(QMouseEvent *e)override{
@@ -198,6 +223,11 @@ public:
             QString old=expr,oldInitial=initial;expr=next;initial=start;
             if(ready&&(expr!=old||initial!=oldInitial)){makeCurrent();bool ok=rebuild();doneCurrent();if(!ok){expr=old;initial=oldInitial;return false;}}update();return true;
         }catch(const std::exception &e){lastError=e.what();return false;}
+    }
+    QImage renderImage(QSize size){
+        makeCurrent();GLint limit;glGetIntegerv(GL_MAX_TEXTURE_SIZE,&limit);if(size.width()>limit||size.height()>limit){doneCurrent();return {};}
+        QImage image;{QOpenGLFramebufferObject framebuffer(size);if(framebuffer.isValid()){framebuffer.bind();exportSize=size;paintGL();image=framebuffer.toImage();exportSize={};glBindFramebuffer(GL_FRAMEBUFFER,defaultFramebufferObject());}}doneCurrent();
+        if(!image.isNull()&&settings.orbit){QPainter painter(&image);drawOrbit(painter,size);}return image;
     }
     bool check(){makeCurrent();bool ok=shader&&glGetError()==GL_NO_ERROR;doneCurrent();return ok;}
 };
@@ -233,10 +263,13 @@ public:
             if(dialog.exec()==QDialog::Accepted){lower=from.value();upper=to.value();slider->setVisible(enabled.isChecked());slider->setToolTip(QString("%1 to %2").arg(lower,0,'g',12).arg(upper,0,'g',12));sync();}
         });sync();
     }
+    QJsonObject state()const{return {{"lower",lower},{"upper",upper},{"enabled",!slider->isHidden()}};}
+    void restoreState(QJsonObject state){double lo=state["lower"].toDouble(NAN),hi=state["upper"].toDouble(NAN);double minimum=realEditor?realEditor->minimum():intEditor->minimum(),maximum=realEditor?realEditor->maximum():intEditor->maximum();if(!std::isfinite(lo)||!std::isfinite(hi)||lo>=hi||lo<minimum||hi>maximum)return;lower=lo;upper=hi;slider->setVisible(state["enabled"].toBool());sync();}
     bool test(){lower=realEditor?-0.5:16;upper=realEditor?0.5:116;slider->setValue(5000);bool ok=std::abs(value()-(lower+upper)*.5)<1e-8;slider->setValue(10000);return ok&&std::abs(value()-upper)<1e-8;}
 };
 
 class Playground:public QMainWindow {
+#include "playground_tools.inc"
     View *left,*right;QDockWidget *dock;QComboBox *target,*preset,*palette;QLineEdit *equation;QLabel *error,*coordinates;
     QDoubleSpinBox *exponent,*bailout,*frequency,*phase,*smoothing;QSpinBox *iterations;QCheckBox *linked;
     QList<View*> views;
@@ -266,6 +299,9 @@ class Playground:public QMainWindow {
     void removeView(){
         if(views.size()==1)return;
         leaveFullscreen();View *view=active();auto *parent=qobject_cast<QSplitter*>(view->parentWidget());
+        int removedNumber=view->property("number").toInt();
+        routes.erase(std::remove_if(routes.begin(),routes.end(),[&](PickRoute r){return r.source==removedNumber||r.target==removedNumber;}),routes.end());
+        QJsonArray remainingTracks;for(auto track:tracks)if(track.toObject()["view"].toInt()!=removedNumber)remainingTracks.append(track);tracks=remainingTracks;
         views.removeOne(view);pickLinks.remove(view);for(auto it=pickLinks.begin();it!=pickLinks.end();){if(it.value()==view)it=pickLinks.erase(it);else ++it;}
         view->setParent(nullptr);delete view;
         if(parent!=root&&parent->count()==1){QWidget *remaining=parent->widget(0);auto *grand=qobject_cast<QSplitter*>(parent->parentWidget());int index=grand->indexOf(parent);remaining->setParent(nullptr);grand->replaceWidget(index,remaining);delete parent;remaining->show();}
@@ -341,13 +377,16 @@ class Playground:public QMainWindow {
             if(QRegularExpression("\\bpixel\\b").match(Equation::compile(source->settings.equation)).hasMatch())throw std::runtime_error("Use c rather than pixel in the source recurrence so it can become a constant Julia parameter.");
             Settings previous=destination->settings;
             destination->settings=source->settings;
-            auto &s=destination->settings;s.palette=previous.palette;s.frequency=previous.frequency;s.phase=previous.phase;s.smoothing=previous.smoothing;
+            auto &s=destination->settings;s.palette=previous.palette;s.frequency=previous.frequency;s.phase=previous.phase;s.smoothing=previous.smoothing;s.gradient=previous.gradient;s.whiteUntil=previous.whiteUntil;s.blueAt=previous.blueAt;
             s.variables[3].source=Pixel;s.variables[2]=previous.variables[2];s.variables[2].source=Mouse;
             if(!destination->apply()){destination->settings=previous;throw std::runtime_error(destination->lastError.toStdString());}
             pickLinks[destination]=source;linked->setChecked(true);destination->reset();target->setCurrentIndex(views.indexOf(destination));load();error->clear();return true;
         }catch(const std::exception &e){error->setText(e.what());return false;}
     }
     void picked(View *source,double x,double y,Qt::KeyboardModifiers modifiers){
+        int flags=int(modifiers&(Qt::ShiftModifier|Qt::ControlModifier|Qt::AltModifier));bool routed=false;
+        for(auto route:routes)if(route.source==source->property("number").toInt()&&route.modifiers==flags){if(auto *dest=byNumber(route.target)){auto &v=dest->settings.variables[route.variable];v.source=Mouse;v.real=x;v.imag=y;dest->apply();if(active()==dest)load();routed=true;}}
+        if(routed)return;
         QList<View*> destinations;
         if(linked->isChecked()){for(auto *view:views)if(pickLinks.value(view)==source)destinations<<view;}
         if(destinations.isEmpty())destinations<<source;
@@ -391,7 +430,7 @@ public:
         for(int i=0;i<4;++i)addVariable(form,i);
         exponent=number(-100,100);bailout=number(.001,1e9);form->addRow("Exponent p",exponent);form->addRow("Escape radius",bailout);
         iterations=new QSpinBox;iterations->setRange(16,10000);iterations->setSingleStep(100);iterations->setKeyboardTracking(false);form->addRow("Iterations",iterations);
-        palette=new QComboBox;palette->addItems({"Spectrum","Ember","Ocean","Monochrome","White / Colour / Black"});form->addRow("Palette",palette);frequency=number(.00001,10);frequency->setSingleStep(.005);phase=number(-100,100);phase->setSingleStep(.05);form->addRow("Colour frequency",frequency);form->addRow("Colour phase",phase);smoothing=number(0,1,3);smoothing->setSingleStep(.1);smoothing->setToolTip("0: integer escape bands; 1: continuous escape-time colouring. Most accurate for polynomial escape formulas with p > 1.");form->addRow("Colour smoothing",smoothing);
+        palette=new QComboBox;palette->addItems({"Spectrum","Ember","Ocean","Monochrome","White / Colour / Black","Custom gradient"});form->addRow("Palette",palette);frequency=number(.00001,10);frequency->setSingleStep(.005);phase=number(-100,100);phase->setSingleStep(.05);form->addRow("Colour frequency",frequency);form->addRow("Colour phase",phase);smoothing=number(0,1,3);smoothing->setSingleStep(.1);smoothing->setToolTip("0: integer escape bands; 1: continuous escape-time colouring. Most accurate for polynomial escape formulas with p > 1.");form->addRow("Colour smoothing",smoothing);
         for(int row=0;row<form->rowCount();++row){
             auto *item=form->itemAt(row,QFormLayout::FieldRole);
             if(item){if(auto *numeric=qobject_cast<QAbstractSpinBox*>(item->widget())){form->removeWidget(numeric);form->setWidget(row,QFormLayout::FieldRole,new NumericSlider(numeric));}}
@@ -400,7 +439,7 @@ public:
         coordinates=new QLabel("Click a point to inspect its complex coordinate");statusBar()->addWidget(coordinates,1);
         for(auto *v:{exponent,bailout,frequency,phase,smoothing})connect(v,&QDoubleSpinBox::valueChanged,this,[this]{apply();});
         connect(iterations,&QSpinBox::valueChanged,this,[this]{apply();});connect(palette,&QComboBox::currentIndexChanged,this,[this]{apply();});
-        bindView(left);bindView(right);load();QTimer::singleShot(0,this,[this]{balance();});
+        bindView(left);bindView(right);load();setupTools();QTimer::singleShot(0,this,[this]{balance();});
     }
     bool smoke(){
         auto *realTest=new QDoubleSpinBox;realTest->setRange(-10,10);realTest->setDecimals(8);
@@ -431,6 +470,21 @@ public:
         ok=ok&&fourth->settings.palette==4&&fourth->settings.frequency==.123&&fourth->settings.phase==.4&&fourth->settings.smoothing==.3;
         ok=copySettings(third,fourth)&&ok;ok=ok&&fourth->settings.variables[2].source==Pixel;
         removeView();ok=ok&&views.size()==3;removeView();removeView();ok=ok&&views.size()==1;removeView();ok=ok&&views.size()==1;
+        active()->settings=Settings();active()->settings.palette=5;active()->apply();
+        QImage exported=active()->renderImage({320,240});ok=ok&&exported.size()==QSize(320,240);
+        QTemporaryDir temporary;QString imagePath=temporary.filePath("test.png");ok=ok&&exported.save(imagePath,"PNG")&&QImage(imagePath).size()==QSize(320,240);
+        auto saved=snapshot();ok=restore(saved)&&ok;ok=ok&&active()->settings.palette==5&&views.size()==1;
+        auto bad=saved;bad["version"]=99;ok=!restore(bad)&&ok;
+        int id=active()->property("number").toInt();tracks={QJsonObject{{"view",id},{"parameter",12},{"time",0.0},{"value",0.0}},QJsonObject{{"view",id},{"parameter",12},{"time",2.0},{"value",1.0}}};animateAt(1);ok=ok&&std::abs(active()->settings.phase-.5)<1e-9;
+        history.clear();historyIndex=-1;checkpoint();active()->settings.phase=.75;checkpoint();travel(-1);ok=ok&&std::abs(active()->settings.phase-.5)<1e-9;travel(1);ok=ok&&std::abs(active()->settings.phase-.75)<1e-9;
+        auto orbit=ComplexExpression::evaluate("z^2+c",[](QString name){return name=="z"?std::complex<double>(1,1):std::complex<double>(.5,0);});ok=ok&&std::abs(orbit-std::complex<double>(.5,2))<1e-9;
+        active()->settings.orbit=true;
+        QMouseEvent orbitClick(QEvent::MouseButtonPress,QPointF(20,20),QPointF(20,20),Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);QApplication::sendEvent(active(),&orbitClick);
+        active()->renderImage({96,96});active()->update();
+        splitView(Qt::Horizontal);View *routeSource=views.first(),*routeTarget=views.last();routes<<PickRoute{routeSource->property("number").toInt(),routeTarget->property("number").toInt(),1,int(Qt::AltModifier)};picked(routeSource,.42,-.13,Qt::AltModifier);ok=ok&&routeTarget->settings.variables[1].real==.42;
+        auto multi=snapshot();ok=restore(multi)&&ok;ok=ok&&views.size()==2&&routes.size()==1&&tracks.size()==2;
+        QSaveFile workspace(temporary.filePath("workspace.json"));ok=workspace.open(QIODevice::WriteOnly)&&ok;workspace.write(QJsonDocument(multi).toJson());ok=workspace.commit()&&ok;
+        active()->renderImage({64,64});
         try{Equation::compile("z; invalid");ok=false;}catch(const std::exception &){}
         if(!ok)qWarning()<<"Playground regression check failed";
         return ok;
