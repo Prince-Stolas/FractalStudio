@@ -486,6 +486,9 @@ public:
         QMouseEvent deleteStop(QEvent::MouseButtonPress,QPointF(260,60),QPointF(260,60),Qt::RightButton,Qt::RightButton,Qt::NoModifier);QApplication::sendEvent(&bar,&deleteStop);ok=ok&&bar.stops.size()==4;
         bar.resetMonochrome();ok=ok&&bar.stops.size()==2&&gradientColour(bar.stops,0)==QColor(Qt::black)&&gradientColour(bar.stops,1)==QColor(Qt::white);
         QMouseEvent keepMinimum(QEvent::MouseButtonPress,QPointF(14,60),QPointF(14,60),Qt::RightButton,Qt::RightButton,Qt::NoModifier);QApplication::sendEvent(&bar,&keepMinimum);ok=ok&&bar.stops.size()==2;
+        ok=bar.setSelectedPosition(.5)&&ok;ok=ok&&bar.selectedPosition()==.5;
+        ok=!bar.setSelectedPosition(1)&&ok;ok=ok&&bar.selectedPosition()==.5;
+        bar.setStops(Settings().gradient);ok=ok&&bar.selectedPosition()==0;
         try{Equation::compile("z; invalid");ok=false;}catch(const std::exception &){}
         if(!ok)qWarning()<<"Playground regression check failed";
         return ok;

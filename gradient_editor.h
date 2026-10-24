@@ -23,6 +23,9 @@ public:
     QJsonArray stops;
     std::function<void()> changed;
     explicit GradientBar(QWidget *parent=nullptr):QWidget(parent){setMinimumSize(400,80);}
+    double selectedPosition()const{return selected>=0&&selected<stops.size()?stops[selected].toObject()["position"].toDouble():-1;}
+    bool setSelectedPosition(double value){if(selected<0||selected>=stops.size()||!std::isfinite(value)||value<0||value>1)return false;for(int i=0;i<stops.size();++i)if(i!=selected&&stops[i].toObject()["position"].toDouble()==value)return false;auto stop=stops[selected].toObject();stop["position"]=value;stops[selected]=stop;sort();update();if(changed)changed();return true;}
+    void setStops(QJsonArray values){stops=values;selected=stops.isEmpty()?-1:0;dragging=false;update();if(changed)changed();}
     void editColour(){if(selected<0||selected>=stops.size())return;auto stop=stops[selected].toObject();QColor colour=QColorDialog::getColor(QColor(stop["colour"].toString()),this);if(colour.isValid()){stop["colour"]=colour.name();stops[selected]=stop;update();if(changed)changed();}}
     void resetMonochrome(){stops={QJsonObject{{"position",0.0},{"colour","#000000"}},QJsonObject{{"position",1.0},{"colour","#ffffff"}}};selected=0;dragging=false;update();if(changed)changed();}
     void removeSelected(){if(stops.size()<=2||selected<0)return;stops.removeAt(selected);selected=0;update();if(changed)changed();}
