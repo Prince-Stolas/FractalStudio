@@ -195,7 +195,11 @@ Keep changes native, cross-platform, and focused. Follow `ATELIER.md`, preserve 
 
 ## License
 
-No project license has been selected yet. This repository does not currently grant general permission to redistribute or reuse its code. Qt and other dependencies retain their respective licenses.
+Fractal Studio is **source-available** under the [PolyForm Noncommercial License 1.0.0](LICENSE). You may use, modify, and share it for the purposes permitted by that license, including noncommercial personal study, research, and hobby projects. Keep the license and its Required Notice with copies.
+
+Commercial use outside those permissions requires a separate license from [Prince-Stolas](https://github.com/Prince-Stolas). This is not an OSI-approved open-source license. Qt and other dependencies retain their respective licenses.
+
+© 2026 Stolas.
 
 ---
 
