@@ -83,6 +83,9 @@ inline void applyStudioTheme(QApplication &app) {
         QTabBar::tab { padding: 8px 12px; color: #aaaaaa; border-bottom: 2px solid transparent; }
         QTabBar::tab:selected { color: #eeeeee; border-bottom-color: #bbbbbb; background: #333333; }
         QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox { background: #202020; border: 1px solid #454545; border-radius: 2px; min-height: 23px; padding: 2px 5px; selection-background-color: #585858; }
+        QComboBox::drop-down { width: 22px; border: 0; }
+        QComboBox::down-arrow { image: url(:/ui/icons/chevron-down.svg); width: 10px; height: 6px; }
+        QComboBox { padding-right: 24px; }
         QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus { border-color: #888888; }
         QSpinBox::up-button, QDoubleSpinBox::up-button { subcontrol-origin: border; subcontrol-position: top right; width: 18px; border: 0; border-left: 1px solid #3c3c3c; }
         QSpinBox::up-arrow, QDoubleSpinBox::up-arrow { image: url(:/ui/icons/chevron-up.svg); width: 10px; height: 6px; }

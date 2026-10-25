@@ -50,7 +50,7 @@ class Playground : public QMainWindow {
     QLineEdit *equation;
     QLabel *error, *coordinates;
     QDoubleSpinBox *bailout, *frequency, *phase, *smoothing;
-    QSpinBox *iterations;
+    QSpinBox *iterations, *historySize;
     QList<View *> views;
     int nextNumber = 1;
     void viewOperations();

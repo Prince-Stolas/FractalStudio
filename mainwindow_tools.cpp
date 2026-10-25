@@ -19,7 +19,7 @@ void Playground::persistGradients() {
 void Playground::refreshPalettes() {
     QSignalBlocker block(palette);
     palette->clear();
-    palette->addItems({"Spectrum", "Ember", "Ocean", "Monochrome", "White / Colour / Black"});
+    palette->addItems({"Spectrum", "Ember", "Ocean", "Monochrome"});
     for (auto item : gradientLibrary)
         palette->addItem(item.toObject()["name"].toString());
     for (auto *view : views)
@@ -81,6 +81,7 @@ QJsonObject Playground::settingsJson(const Settings &s) const {
     return {{"negativeHistory", negative},
             {"equation", s.equation},
             {"iterations", s.iterations},
+            {"historySize", s.historySize},
             {"palette", s.palette},
             {"bailout", s.bailout},
             {"frequency", s.frequency},
@@ -110,6 +111,9 @@ Settings Playground::readSettings(QJsonObject o) const {
     }
     s.equation = o["equation"].toString();
     s.iterations = int(finite("iterations", 16, 10000));
+    s.historySize = o["historySize"].toInt(1);
+    if (s.historySize < 1 || s.historySize > 10000)
+        throw std::runtime_error("History size must be between 1 and 10000");
     s.palette = int(finite("palette", 0, 5));
     s.bailout = finite("bailout", .001, 1e9);
     s.frequency = finite("frequency", .00001, 10);
@@ -588,7 +592,7 @@ void Playground::gradientDialog() {
 void Playground::negativeHistoryDialog() {
     View *view = active();
     QDialog dialog(this);
-    dialog.setWindowTitle("Initial values before z[0]");
+    dialog.setWindowTitle(viewName(view) + " — Initial values before z[0]");
     QVBoxLayout layout(&dialog);
     QLabel help("z[0] uses the Initial z settings. Negative indices default to 0 + 0i; add "
                 "overrides here for recurrences using z[n-1], z[n-2], etc.");
@@ -1071,7 +1075,7 @@ void Playground::setupTools() {
             QVBoxLayout layout(&dialog);
             QTextBrowser browser;
             browser.setHtml(
-                R"(<h1>Fractal Studio</h1><h2>Explore</h2><p>Drag with the left button to pan. Scroll to zoom at the cursor. Home resets the camera; F11 focuses the active view, Ctrl+F11 the layout, and Escape exits fullscreen. Tab toggles the sidebar. View contains panel and layout controls.</p><h2>Equations and variables</h2><p>Presets are editable equations. Use z[n] for the current iterate; n starts at zero. Ten values are retained, from z[max(0,n-9)] through z[n]. Negative indices default to zero; Tools → Negative history seeds provides overrides. Future, fractional and expired indices render magenta. Bare z and z_n are invalid.</p><p>Variables are ordinary named complex values, including p (initially 2) and c. Add or delete them in the variable editor. Each supports Constant, Mouse picked and Pixel coordinate sources. Initial z is separate and also supports Equation. Right-drag picks all variables matching the chosen modifiers. Picking is local unless an explicit link is configured; links preserve sources except Pixel becomes Constant.</p><p>Operators: + − * / % ^. Functions: sin, cos, exp, log, conj, abs, norm, floor, ceil. abs is component-wise; norm is magnitude. Modulo requires a nonzero real divisor. Built-ins: pixel, i, pi, n. Example: z[n]^p+c.</p><h2>Colour and tools</h2><p>Presets and Julia conversion preserve target colours. The global gradient editor supports click to add, drag to move, double-click to recolour and right-click to delete stops. Two matching stops make a flat colour region. Use the ↔ button beside numbers to configure sliders.</p><p>File saves the workspace or exports PNG. Tools provides orbit tracing, picking links, animation and negative seeds. Workspaces preserve named variables and dock layout.</p><h2>Precision</h2><p>There is no artificial zoom cap. Double precision eventually limits coordinate detail; transcendental functions use float precision. Continuous colouring uses a quadratic reference, so unusual formulas may need reduced smoothing or different escape radii.</p>)");
+                R"(<h1>Fractal Studio</h1><h2>Explore</h2><p>Drag with the left button to pan. Scroll to zoom at the cursor. Home resets the camera; F11 focuses the active view, Ctrl+F11 the layout, and Escape exits fullscreen. Tab toggles the sidebar. View contains panel and layout controls.</p><h2>Equations and variables</h2><p>Presets are editable equations. Use z[n] for the current iterate; n starts at zero. History size is per view under Parameters, defaults to 1, and is never inferred from the equation. A size of 3 retains z[n], z[n-1] and z[n-2]. Larger sizes use more GPU resources. Negative indices default to zero; Tools → Negative history seeds provides overrides. Future, fractional and expired indices render magenta. Bare z and z_n are invalid.</p><p>Variables are ordinary named complex values, including p (initially 2) and c. Add or delete them in the variable editor. Each supports Constant, Mouse picked and Pixel coordinate sources. Initial z is separate and also supports Equation. Right-drag picks all variables matching the chosen modifiers. Picking is local unless an explicit link is configured; links preserve sources except Pixel becomes Constant.</p><p>Operators: + − * / % ^. Functions: sin, cos, exp, log, conj, abs, norm, floor, ceil, real, imag. real(w) returns its real component and imag(w) its imaginary component, each as a real-valued complex number. Imaginary constants may be written as 2i or -0.5i. abs is component-wise; norm is magnitude. Modulo requires a nonzero real divisor. Built-ins: pixel, i, pi, n. Example: z[n]^p+c.</p><h2>Colour and tools</h2><p>Presets and Julia conversion preserve target colours. The global gradient editor supports click to add, drag to move, double-click to recolour and right-click to delete stops. Two matching stops make a flat colour region. Use the ↔ button beside numbers to configure sliders.</p><p>File saves the workspace or exports PNG. Tools provides orbit tracing, picking links, animation and negative seeds. Workspaces preserve named variables and dock layout.</p><h2>Precision</h2><p>There is no artificial zoom cap. Double precision eventually limits coordinate detail; transcendental functions use float precision. Continuous colouring uses a quadratic reference, so unusual formulas may need reduced smoothing or different escape radii.</p>)");
             layout.addWidget(&browser);
             QDialogButtonBox buttons(QDialogButtonBox::Close);
             layout.addWidget(&buttons);

@@ -6,13 +6,13 @@ void View::drawOrbit(QPainter &painter, QSize size) {
     using C = std::complex<double>;
     C pixel(px, py), z(0);
     int iteration = 0;
-    QVector<C> past;
+    QVector<C> past(settings.historySize);
     auto historyValue = [&](int i) {
         if (i < 0) {
             auto value = settings.negativeHistory.value(i);
             return C(value.x(), value.y());
         }
-        return past.at(i);
+        return past.at(i % settings.historySize);
     };
     auto value = [&](QString name) -> C {
         if (name == "z" || name == "z_n")
@@ -41,9 +41,9 @@ void View::drawOrbit(QPainter &painter, QSize size) {
         painter.setPen(QPen(QColor("#ffeb55"), 1.5));
         for (iteration = 0; iteration < settings.orbitSteps; ++iteration) {
             if (iteration == 0)
-                past.append(z);
-            C next = ComplexExpression::evaluate(settings.equation, value, historyValue);
-            past.append(next);
+                past[0] = z;
+            C next = ComplexExpression::evaluate(settings.equation, value, historyValue, settings.historySize);
+            past[(iteration + 1) % settings.historySize] = next;
             if (!std::isfinite(next.real()) || !std::isfinite(next.imag()))
                 break;
             QPointF a = screen(z), b = screen(next);
@@ -97,8 +97,8 @@ QString View::fragment() const {
 out vec4 frag;
 uniform dvec2 center,constantC,paramA,paramB,z0;
 %3
- dvec2 past[10];double currentN;bool invalidHistory=false;
- dvec2 historyAt(dvec2 index){if(index.y!=0.0||isnan(index.x)||isinf(index.x)||floor(index.x)!=index.x){invalidHistory=true;return dvec2(0);}if(index.x<0.0)return negativeAt(index.x);if(index.x<max(0.0,currentN-9.0)||index.x>currentN){invalidHistory=true;return dvec2(0);}return past[clamp(int(mod(index.x,10.0)),0,9)];}
+ dvec2 past[%5];double currentN;bool invalidHistory=false;
+ dvec2 historyAt(dvec2 index){if(index.y!=0.0||isnan(index.x)||isinf(index.x)||floor(index.x)!=index.x){invalidHistory=true;return dvec2(0);}if(index.x<0.0)return negativeAt(index.x);if(index.x<max(0.0,currentN-double(%5-1))||index.x>currentN){invalidHistory=true;return dvec2(0);}return past[clamp(int(mod(index.x,double(%5))),0,%5-1)];}
  dvec2 cmod(dvec2 x,dvec2 y){if(y.y!=0.0||y.x==0.0){invalidHistory=true;return dvec2(0);}return x-y.x*floor(x/y.x);}
 uniform double scale,bailout;
 uniform vec2 resolution,marker;
@@ -123,6 +123,8 @@ dvec2 ccos(dvec2 z){return dvec2(cos(float(z.x))*cosh(float(z.y)),-sin(float(z.x
 dvec2 conjugate(dvec2 z){return dvec2(z.x,-z.y);}
 dvec2 componentAbs(dvec2 z){return abs(z);}
 dvec2 magnitude(dvec2 z){return dvec2(length(z),0);}
+dvec2 realPart(dvec2 z){return dvec2(z.x,0);}
+dvec2 imagPart(dvec2 z){return dvec2(z.y,0);}
 void main(){
  dvec2 pixel=center+dvec2(gl_FragCoord.xy-resolution*.5)*(scale/double(resolution.y));
  dvec2 c=cSource==2?pixel:constantC,a=aSource==2?pixel:paramA,b=bSource==2?pixel:paramB;
@@ -132,7 +134,7 @@ void main(){
  bool inside=false;
  if(quadratic!=0){double y2=c.y*c.y,x=c.x-.25,q=x*x+y2;inside=q*(q+x)<=.25*y2||(c.x+1.0)*(c.x+1.0)+y2<=.0625;}
  if(inside)count=iterations;
- else for(int j=0;j<10000;j++){if(j>=iterations)break;n=double(j);currentN=n;z=%2;if(invalidHistory){count=iterations;break;}past[(j+1)%10]=z;radius=dot(z,z);count=j+1;if(isnan(radius)||isinf(radius)||radius>bailout*bailout)break;}
+ else for(int j=0;j<10000;j++){if(j>=iterations)break;n=double(j);currentN=n;z=%2;if(invalidHistory){count=iterations;break;}past[(j+1) % %5]=z;radius=dot(z,z);count=j+1;if(isnan(radius)||isinf(radius)||radius>bailout*bailout)break;}
  vec3 rgb=vec3(.016,.020,.034);
  if(count<iterations){float t=float(count);if(radius>1.0&&!isinf(radius))t+=smoothing*(1.0-log(max(log(float(radius))*.5,.0001))/log(2.0));
  float v=t*frequency+phase;
@@ -147,7 +149,7 @@ void main(){
  if(invalidHistory)rgb=vec3(1.0,0.0,1.0);
  frag=vec4(rgb,1);
 })GLSL")
-        .arg(initial, expr, declarations(), bindings());
+        .arg(initial, expr, declarations(), bindings()).arg(settings.historySize);
 }
 
 bool View::rebuild() {

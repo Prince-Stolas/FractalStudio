@@ -3,7 +3,7 @@
 bool Equation::validName(QString name) {
     return QRegularExpression("^[A-Za-z_][A-Za-z0-9_]*$").match(name).hasMatch() &&
            !QStringList{"z",   "z_n", "n",    "pixel", "i",    "pi",    "sin", "cos",
-                        "exp", "log", "conj", "abs",   "norm", "floor", "ceil"}
+                        "exp", "log", "conj", "abs",   "norm", "floor", "ceil", "real", "imag"}
                 .contains(name);
 }
 
@@ -100,8 +100,14 @@ QString Equation::atom() {
         double n = text.mid(start, pos - start).toDouble(&ok);
         if (!ok || !std::isfinite(n))
             throw std::runtime_error("Invalid number");
-        return "dvec2(" + QString::number(n, 'g', 17) +
-               (std::floor(n) == n && std::abs(n) < 1e15 ? ".0" : "") + ",0.0)";
+        QString literal = QString::number(n, 'g', 17) +
+            (std::floor(n) == n && std::abs(n) < 1e15 ? ".0" : "");
+        if (pos < text.size() && text[pos] == 'i' &&
+            (pos + 1 == text.size() || (!text[pos + 1].isLetterOrNumber() && text[pos + 1] != '_'))) {
+            ++pos;
+            return "dvec2(0.0," + literal + ")";
+        }
+        return "dvec2(" + literal + ",0.0)";
     }
     while (pos < text.size() && (text[pos].isLetterOrNumber() || text[pos] == '_'))
         ++pos;
@@ -127,6 +133,8 @@ QString Equation::atom() {
     if (id == "pi")
         return "dvec2(3.141592653589793,0.0)";
     QString fn;
+    if (id == "real") fn = "realPart";
+    if (id == "imag") fn = "imagPart";
     if (id == "sin")
         fn = "csin";
     if (id == "cos")

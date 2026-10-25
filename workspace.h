@@ -8,6 +8,7 @@ class ComplexExpression {
     using C = std::complex<double>;
     QString text;
     int pos = 0;
+    int historyLimit = 10;
     std::function<C(QString)> variable;
     std::function<C(int)> history;
     void space();
@@ -19,5 +20,5 @@ class ComplexExpression {
 
   public:
     static C evaluate(QString text, std::function<C(QString)> variables,
-                      std::function<C(int)> history = {});
+                      std::function<C(int)> history = {}, int historyLimit = 10);
 };

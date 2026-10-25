@@ -363,7 +363,8 @@ void Playground::load() {
     equation->setText(s.equation);
     bailout->setValue(s.bailout);
     iterations->setValue(s.iterations);
-    palette->setCurrentIndex(s.palette == 5 ? qMax(5, palette->findText(s.gradientName))
+    historySize->setValue(s.historySize);
+    palette->setCurrentIndex(s.palette >= 4 ? qMax(4, palette->findText(s.gradientName))
                                             : s.palette);
     frequency->setValue(s.frequency);
     phase->setValue(s.phase);
@@ -396,9 +397,10 @@ void Playground::apply() {
     s.equation = equation->text();
     s.bailout = bailout->value();
     s.iterations = iterations->value();
-    s.palette = qMin(5, palette->currentIndex());
-    if (palette->currentIndex() >= 5 && palette->currentIndex() - 5 < gradientLibrary.size()) {
-        auto entry = gradientLibrary[palette->currentIndex() - 5].toObject();
+    s.historySize = historySize->value();
+    s.palette = palette->currentIndex() >= 4 ? 5 : palette->currentIndex();
+    if (palette->currentIndex() >= 4 && palette->currentIndex() - 4 < gradientLibrary.size()) {
+        auto entry = gradientLibrary[palette->currentIndex() - 4].toObject();
         s.gradientName = entry["name"].toString();
         s.gradient = entry["stops"].toArray();
     }
@@ -668,7 +670,7 @@ void Playground::initializeWorkspace() {
     equation = new QLineEdit;
     equation->setMaxLength(512);
     equation->setFont(QFont("Consolas", 11));
-    form->addRow("RECURRENCE  /  z[n+1]", equation);
+    form->addRow("z[n+1] =", equation);
     auto *applyButton = new QPushButton("Compile equation");
     form->addRow(applyButton);
     connect(applyButton, &QPushButton::clicked, this, [this] { apply(); });
@@ -679,6 +681,7 @@ void Playground::initializeWorkspace() {
     form->addRow(error);
     variableDock = new QDockWidget("Variables", this);
     variableDock->setObjectName("variableEditor");
+    variableDock->setMinimumWidth(440);
     variableDock->setAllowedAreas(Qt::AllDockWidgetAreas);
     variableDock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable |
                               QDockWidget::DockWidgetFloatable);
@@ -703,6 +706,12 @@ void Playground::initializeWorkspace() {
     parameterForm->addRow(openVariables);
     auto *seeds = new QPushButton("History seeds…");
     parameterForm->addRow(seeds);
+    historySize = new QSpinBox;
+    historySize->setRange(1, 10000);
+    historySize->setKeyboardTracking(false);
+    historySize->setToolTip("Values retained per pixel, including z[n]. Use 3 for z[n-2]. Large buffers may exceed GPU resources.");
+    parameterForm->addRow("History size", historySize);
+    connect(historySize, &QSpinBox::valueChanged, this, [this] { apply(); });
     connect(seeds, &QPushButton::clicked, this, [this] { negativeHistoryDialog(); });
     auto *links = new QPushButton("Picking links…");
     parameterForm->addRow(links);
@@ -726,7 +735,7 @@ void Playground::initializeWorkspace() {
     connect(gradients, &QPushButton::clicked, this, [this] { gradientDialog(); });
     palette = new QComboBox;
     palette->addItems(
-        {"Spectrum", "Ember", "Ocean", "Monochrome", "White / Colour / Black", "Custom gradient"});
+        {"Spectrum", "Ember", "Ocean", "Monochrome", "Custom gradient"});
     form->addRow("Palette", palette);
     frequency = number(.00001, 10);
     frequency->setSingleStep(.005);

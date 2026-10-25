@@ -81,6 +81,11 @@ ComplexExpression::C ComplexExpression::atom() {
         double value = text.mid(start, pos - start).toDouble(&ok);
         if (!ok)
             throw std::runtime_error("Invalid number");
+        if (pos < text.size() && text[pos] == 'i' &&
+            (pos + 1 == text.size() || (!text[pos + 1].isLetterOrNumber() && text[pos + 1] != '_'))) {
+            ++pos;
+            return C(0, value);
+        }
         return C(value);
     }
     while (pos < text.size() && (text[pos].isLetterOrNumber() || text[pos] == '_'))
@@ -101,8 +106,8 @@ ComplexExpression::C ComplexExpression::atom() {
         }
         if (index.real() > n)
             throw std::runtime_error("Future z index exceeds n");
-        if (index.real() < n - 9)
-            throw std::runtime_error("z index is older than the 10-value history window");
+        if (index.real() < n - historyLimit + 1)
+            throw std::runtime_error("z index is older than this view's history size");
         if (!history)
             throw std::runtime_error("z history is unavailable");
         return history(int(index.real()));
@@ -111,6 +116,8 @@ ComplexExpression::C ComplexExpression::atom() {
         C x = sum();
         if (!eat(')'))
             throw std::runtime_error("Expected parenthesis");
+        if (name == "real") return C(x.real(), 0);
+        if (name == "imag") return C(x.imag(), 0);
         if (name == "floor")
             return C(std::floor(x.real()), std::floor(x.imag()));
         if (name == "ceil")
@@ -143,11 +150,12 @@ ComplexExpression::C ComplexExpression::atom() {
 }
 
 ComplexExpression::C ComplexExpression::evaluate(QString text, std::function<C(QString)> variables,
-                                                 std::function<C(int)> history) {
+                                                 std::function<C(int)> history, int historyLimit) {
     ComplexExpression e;
     e.text = text;
     e.variable = variables;
     e.history = history;
+    e.historyLimit = historyLimit;
     C result = e.sum();
     e.space();
     if (e.pos != text.size())

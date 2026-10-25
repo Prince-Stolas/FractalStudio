@@ -219,7 +219,7 @@ bool Playground::smoke() {
         gradientLibrary.append(
             QJsonObject{{"name", QString("Test %1").arg(i)}, {"stops", bar.stops}});
     refreshPalettes();
-    ok = ok && palette->count() >= 30;
+    ok = ok && palette->count() >= 29 && palette->findText("White / Colour / Black") < 0;
     QMouseEvent deleteStop(QEvent::MouseButtonPress, QPointF(260, 60), QPointF(260, 60),
                            Qt::RightButton, Qt::RightButton, Qt::NoModifier);
     QApplication::sendEvent(&bar, &deleteStop);
@@ -279,6 +279,7 @@ bool Playground::smoke() {
     active()->settings.variables[2].source = Constant;
     active()->settings.variables[2].real = 0;
     active()->settings.variables[2].imag = 0;
+    active()->settings.historySize = 2;
     active()->settings.equation = "z[n-n%2]*0.1+0.1";
     ok = active()->apply() && ok;
     QImage rolling = active()->renderImage({32, 32});
@@ -355,6 +356,23 @@ bool Playground::smoke() {
     ok = active()->apply() && ok;
     regular.equation = "z[n]^p+c";
     ok = !active()->apply() && ok;
+    ok = ok && Settings().historySize == 1 && variableDock->minimumWidth() >= 440;
+    auto components = ComplexExpression::evaluate("real(3+2i)+imag(1-4i)+2i", [](QString){return std::complex<double>(0);});
+    ok = ok && std::abs(components - std::complex<double>(-1, 2)) < 1e-9;
+    active()->settings = Settings();
+    active()->settings.equation = "real(z[n])+imag(c)*i+2i";
+    ok = active()->apply() && ok;
+    ok = ok && !active()->renderImage({16,16}).isNull();
+    active()->settings.equation = "z[n-2]*0.1+0.1";
+    active()->settings.historySize = 1;
+    ok = active()->apply() && ok;
+    ok = ok && active()->renderImage({16,16}).pixelColor(8,8) == QColor(255,0,255);
+    active()->settings.historySize = 3;
+    ok = active()->apply() && ok;
+    ok = ok && active()->renderImage({16,16}).pixelColor(8,8) != QColor(255,0,255);
+    ok = ok && readSettings(settingsJson(active()->settings)).historySize == 3;
+    Settings anotherView;
+    ok = ok && anotherView.negativeHistory.isEmpty();
     if (!ok)
         qWarning() << "Playground regression check failed" << error->text() << active()->lastError;
     return ok;

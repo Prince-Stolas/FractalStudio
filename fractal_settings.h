@@ -11,6 +11,7 @@ struct Settings {
     QString equation = "z[n]^p+c";
     QStringList names = {"", "", "c", "", "p"};
     int iterations = 128, palette = 0;
+    int historySize = 1;
     double bailout = 16, frequency = .025, phase = 0, smoothing = 1;
     QJsonArray gradient = {QJsonObject{{"position", 0.0}, {"colour", "#ffffff"}},
                            QJsonObject{{"position", .25}, {"colour", "#5599ff"}},
