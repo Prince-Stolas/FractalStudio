@@ -25,7 +25,17 @@ if(MINGW)
         endforeach()
     endforeach()
 endif()
-qt_add_executable(fractal WIN32 playground.cpp)
+qt_add_executable(fractal WIN32
+    playground.cpp
+    equation.cpp
+    fractal_view.cpp
+    numeric_slider.cpp
+    gradient_editor.cpp
+    workspace.cpp
+    mainwindow.cpp
+    mainwindow_tools.cpp
+    regression.cpp
+)
 target_link_libraries(fractal PRIVATE Qt6::Widgets Qt6::OpenGLWidgets)
 qt_import_plugins(fractal EXCLUDE_BY_TYPE imageformats)
 if(MINGW)
