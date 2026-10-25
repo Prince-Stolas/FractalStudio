@@ -27,6 +27,12 @@ bool Playground::smoke() {
     defaults = defaults && hasPresetAction && hasAnimationMenu &&
         !toolbar->actions().isEmpty() &&
         findChild<QComboBox *>("activeViewSelector") == target;
+    defaults = defaults && findChild<QAction *>("splitHorizontal") &&
+        findChild<QAction *>("splitVertical") && findChild<QAction *>("closeActiveView");
+    QColor background = qApp->palette().color(QPalette::Window);
+    defaults = defaults && background.red() == background.green() &&
+        background.green() == background.blue() &&
+        !QIcon(":/ui/icons/chevron-up.svg").isNull();
     splitView(Qt::Horizontal);
     right = views.last();
     left->settings.names = {"a", "b", "c", "", "p"};

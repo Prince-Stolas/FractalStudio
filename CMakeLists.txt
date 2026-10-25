@@ -37,6 +37,8 @@ qt_add_executable(fractal WIN32
     mainwindow_tools.cpp
     regression.cpp
 )
+qt_add_resources(ui_icon_sources ui_resources.qrc)
+target_sources(fractal PRIVATE ${ui_icon_sources})
 target_link_libraries(fractal PRIVATE Qt6::Widgets Qt6::OpenGLWidgets)
 qt_import_plugins(fractal EXCLUDE_BY_TYPE imageformats)
 if(MINGW)
