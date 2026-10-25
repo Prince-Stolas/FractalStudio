@@ -132,7 +132,7 @@ Settings Playground::readSettings(QJsonObject o) const {
             return value;
         };
         c.interiorPalette = object.contains("interiorPalette") ? int(numeric("interiorPalette", 0, 4)) : 4;
-        c.trapViewScaled = object["trapViewScaled"].toBool(true);
+        c.trapViewScaled = object["trapViewScaled"].toBool(false);
         c.mode = int(numeric("mode", 0, 1));
         c.trap = int(numeric("trap", 0, 2));
         c.tolerance = numeric("tolerance", 1e-12, 1);
