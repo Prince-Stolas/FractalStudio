@@ -6,6 +6,27 @@ bool Playground::smoke() {
                     active()->settings.iterations == 128 &&
                     !active()->settings.names.contains("a") &&
                     !active()->settings.names.contains("b");
+    auto *inspectorTabs = findChild<QTabWidget *>("inspectorTabs");
+    defaults = defaults && inspectorTabs && inspectorTabs->count() == 3 &&
+        inspectorTabs->tabText(0) == "Fractal" &&
+        inspectorTabs->tabText(1) == "Parameters" &&
+        inspectorTabs->tabText(2) == "Appearance" &&
+        findChild<QPushButton *>("openPresetGallery") &&
+        variableDock->allowedAreas() == Qt::AllDockWidgetAreas &&
+        findChildren<QDockWidget *>("variableEditor").size() == 1;
+    bool hasPresetAction = false, hasAnimationMenu = false;
+    for (auto *action : menuBar()->actions()) {
+        hasAnimationMenu |= action->text() == "&Animation";
+        if (auto *menu = action->menu()) {
+            for (auto *entry : menu->actions()) {
+                if (entry->text() == "Start from preset…")
+                    hasPresetAction = !entry->icon().isNull();
+            }
+        }
+    }
+    defaults = defaults && hasPresetAction && hasAnimationMenu &&
+        !toolbar->actions().isEmpty() &&
+        findChild<QComboBox *>("activeViewSelector") == target;
     splitView(Qt::Horizontal);
     right = views.last();
     left->settings.names = {"a", "b", "c", "", "p"};

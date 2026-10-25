@@ -1,4 +1,5 @@
 #include "mainwindow.h"
+#include "ui_design.h"
 
 QString Playground::gradientPath() const {
     return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/gradients.json";
@@ -1018,10 +1019,10 @@ void Playground::timelineDialog() {
 void Playground::setupTools() {
     auto *file = menuBar()->addMenu("&File");
     file->addAction(
-        style()->standardIcon(QStyle::SP_DialogOpenButton), "Open workspace…", this,
+        studioIcon("open"), "Open workspace…", this,
         [this] { workspaceFile(false); })->setShortcut(QKeySequence::Open);
     file->addAction(
-        style()->standardIcon(QStyle::SP_DialogSaveButton), "Save workspace…", this,
+        studioIcon("save"), "Save workspace…", this,
         [this] { workspaceFile(true); })->setShortcut(QKeySequence::Save);
     file->addSeparator();
     file->addAction("Export PNG…", this, [this] { exportDialog(); });
@@ -1039,20 +1040,23 @@ void Playground::setupTools() {
     view->addAction(toolbar->toggleViewAction());
     view->addSeparator();
     view->addAction("Reset camera", this, [this] { active()->reset(); });
-    view->addAction("Split horizontally", this, [this] { splitView(Qt::Horizontal); });
-    view->addAction("Split vertically", this, [this] { splitView(Qt::Vertical); });
-    view->addAction("Close active view", this, [this] { removeView(); });
     view->addAction("Balance dividers", this, [this] { balance(); });
     view->addSeparator();
     view->addAction("Fullscreen active view", this, [this] { enterFullscreen(true); });
     view->addAction("Fullscreen layout", this, [this] { enterFullscreen(false); });
+    auto *create = menuBar()->addMenu("&Create");
+    create->addAction(studioIcon("preset"), "Start from preset…", this, &Playground::presetGallery);
+    create->addAction("Split view side by side", this, [this] { splitView(Qt::Horizontal); });
+    create->addAction("Split view stacked", this, [this] { splitView(Qt::Vertical); });
+    create->addSeparator();
+    create->addAction("Close active view", this, [this] { removeView(); });
     auto *tools = menuBar()->addMenu("&Tools");
-    tools->addAction("Timeline…", this, [this] { timelineDialog(); });
-    tools->addAction("Stop animation", this, [this] {
+    auto *animation = menuBar()->addMenu("&Animation");
+    animation->addAction("Timeline…", this, [this] { timelineDialog(); });
+    animation->addAction("Stop animation", this, [this] {
         animationTimer.stop();
         checkpoint();
     });
-    tools->addSeparator();
     tools->addAction("Negative history seeds…", this, [this] { negativeHistoryDialog(); });
     tools->addAction("Orbit visualization…", this, [this] { orbitDialog(); });
     tools->addAction("Gradient library…", this, [this] { gradientDialog(); });

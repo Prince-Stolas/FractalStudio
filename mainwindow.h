@@ -44,7 +44,9 @@ class Playground : public QMainWindow {
 
     View *left, *right;
     QDockWidget *dock;
-    QComboBox *target, *preset, *palette;
+    QComboBox *target, *palette;
+    void presetGallery();
+    void initializeWorkspace();
     QLineEdit *equation;
     QLabel *error, *coordinates;
     QDoubleSpinBox *bailout, *frequency, *phase, *smoothing;

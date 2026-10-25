@@ -1,4 +1,5 @@
 #include "mainwindow.h"
+#include "ui_design.h"
 
 void Playground::viewOperations() {
     QDialog dialog(this);
@@ -369,8 +370,10 @@ void Playground::load() {
     smoothing->setValue(s.smoothing);
     if (controlNames != s.names)
         rebuildVariables();
-    if (variableDock)
+    if (variableDock) {
         variableDock->setWindowTitle("Variables — " + viewName(active()));
+        variableDock->toggleViewAction()->setText("Variable editor");
+    }
     for (int i = 0; i < s.variables.size(); ++i) {
         if (i != 3 && s.names[i].isEmpty())
             continue;
@@ -546,6 +549,10 @@ void Playground::pickInto(View *dest, double x, double y, Qt::KeyboardModifiers 
 }
 
 Playground::Playground() {
+    initializeWorkspace();
+}
+
+void Playground::initializeWorkspace() {
     setWindowTitle("Fractal Studio");
     resize(1420, 900);
     auto *container = new QWidget;
@@ -564,21 +571,61 @@ Playground::Playground() {
         view->setProperty("number", nextNumber++);
     layout->addWidget(root);
     setCentralWidget(container);
-    dock = new QDockWidget("Playground settings", this);
+    dock = new QDockWidget("ACTIVE VIEW  /  INSPECTOR", this);
+    dock->setObjectName("activeViewInspector");
     dock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
     dock->setMinimumWidth(320);
     auto *scroll = new QScrollArea;
     scroll->setWidgetResizable(true);
     auto *body = new QWidget;
-    auto *form = new QFormLayout(body);
-    form->setSpacing(10);
+    auto *inspectorLayout = new QVBoxLayout(body);
+    inspectorLayout->setContentsMargins(16, 18, 16, 16);
+    auto *inspectorTitle = new QLabel("View properties");
+    inspectorTitle->setProperty("role", "title");
+    inspectorLayout->addWidget(inspectorTitle);
+    auto *tabs = new QTabWidget;
+    tabs->setObjectName("inspectorTabs");
+    inspectorLayout->addWidget(tabs);
+    auto makePage = [tabs](const QString &name) {
+        auto *page = new QWidget;
+        auto *form = new QFormLayout(page);
+        form->setContentsMargins(0, 20, 0, 0);
+        form->setVerticalSpacing(14);
+        form->setRowWrapPolicy(QFormLayout::WrapAllRows);
+        form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+        tabs->addTab(page, name);
+        return form;
+    };
+    auto *fractalForm = makePage("Fractal");
+    auto *parameterForm = makePage("Parameters");
+    auto *appearanceForm = makePage("Appearance");
+    auto *form = fractalForm;
+    inspectorLayout->addStretch();
     scroll->setWidget(body);
     dock->setWidget(scroll);
     addDockWidget(Qt::RightDockWidgetArea, dock);
-    toolbar = addToolBar("Quick actions");
+    toolbar = addToolBar("Workspace controls");
+    toolbar->setObjectName("workspaceControls");
     toolbar->setMovable(false);
+    toolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    auto *brand = new QLabel("  FRACTAL STUDIO  ");
+    brand->setProperty("role", "eyebrow");
+    toolbar->addWidget(brand);
+    toolbar->addSeparator();
+    auto *workspaceTitle = new QLabel("Untitled workspace   /   Explore");
+    toolbar->addWidget(workspaceTitle);
+    auto *spacer = new QWidget;
+    spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    toolbar->addWidget(spacer);
+    auto *split = toolbar->addAction(studioIcon("split"), "Split");
+    connect(split, &QAction::triggered, this, [this] { splitView(Qt::Horizontal); });
+    auto *reset = toolbar->addAction(studioIcon("reset"), "Reset");
+    auto *focus = toolbar->addAction(studioIcon("full"), "Focus");
+    connect(focus, &QAction::triggered, this, [this] { enterFullscreen(true); });
+    toolbar->addSeparator();
+    dock->toggleViewAction()->setText("Inspector");
+    dock->toggleViewAction()->setIcon(studioIcon("sliders"));
     toolbar->addAction(dock->toggleViewAction());
-    auto *reset = toolbar->addAction("Reset active view");
     connect(reset, &QAction::triggered, this, [this] { active()->reset(); });
     auto *escape = new QShortcut(QKeySequence(Qt::Key_Escape), this);
     connect(escape, &QShortcut::activated, this, [this] { leaveFullscreen(); });
@@ -602,18 +649,19 @@ Playground::Playground() {
             [this] { dock->setVisible(!dock->isVisible()); });
     target = new QComboBox;
     target->addItem("View 1");
-    form->addRow("Edit", target);
+    inspectorLayout->insertWidget(1, target);
+    target->setObjectName("activeViewSelector");
     connect(target, &QComboBox::currentIndexChanged, this, [this] { load(); });
 
     form->addRow(new QLabel("<b>Equation</b>"));
-    preset = new QComboBox;
-    preset->addItems(
-        {"Mandelbrot", "Julia", "Burning ship", "Tricorn", "Cubic Multibrot", "Sine Julia"});
-    form->addRow("Load preset", preset);
-    connect(preset, &QComboBox::activated, this, [this](int i) { choosePreset(i); });
+    auto *presetButton = new QPushButton(studioIcon("preset"), "Start from preset…");
+    presetButton->setObjectName("openPresetGallery");
+    form->addRow(presetButton);
+    connect(presetButton, &QPushButton::clicked, this, &Playground::presetGallery);
     equation = new QLineEdit;
     equation->setMaxLength(512);
-    form->addRow("z next =", equation);
+    equation->setFont(QFont("Consolas", 11));
+    form->addRow("RECURRENCE  /  z[n+1]", equation);
     auto *applyButton = new QPushButton("Compile equation");
     form->addRow(applyButton);
     connect(applyButton, &QPushButton::clicked, this, [this] { apply(); });
@@ -644,7 +692,14 @@ Playground::Playground() {
     variableDock->hide();
     rebuildVariables();
     auto *openVariables = new QPushButton("Open variable editor…");
-    form->addRow(openVariables);
+    parameterForm->addRow(new QLabel("<b>Complex inputs</b>"));
+    parameterForm->addRow(openVariables);
+    auto *seeds = new QPushButton("History seeds…");
+    parameterForm->addRow(seeds);
+    connect(seeds, &QPushButton::clicked, this, [this] { negativeHistoryDialog(); });
+    auto *links = new QPushButton("Picking links…");
+    parameterForm->addRow(links);
+    connect(links, &QPushButton::clicked, this, [this] { linksDialog(); });
     connect(openVariables, &QPushButton::clicked, this, [this] {
         variableDock->show();
         variableDock->raise();
@@ -657,7 +712,11 @@ Playground::Playground() {
     iterations->setSingleStep(100);
     iterations->setKeyboardTracking(false);
     form->addRow("Iterations", iterations);
-    form->addRow(new QLabel("<b>Appearance</b>"));
+    form = appearanceForm;
+    form->addRow(new QLabel("<b>Colour mapping</b>"));
+    auto *gradients = new QPushButton("Edit gradient library…");
+    form->addRow(gradients);
+    connect(gradients, &QPushButton::clicked, this, [this] { gradientDialog(); });
     palette = new QComboBox;
     palette->addItems(
         {"Spectrum", "Ember", "Ocean", "Monochrome", "White / Colour / Black", "Custom gradient"});
@@ -672,16 +731,18 @@ Playground::Playground() {
     smoothing->setSingleStep(.1);
     smoothing->setToolTip("0: discrete escape bands; 1: continuous quadratic-reference colouring.");
     form->addRow("Colour smoothing", smoothing);
-    for (int row = 0; row < form->rowCount(); ++row) {
-        auto *item = form->itemAt(row, QFormLayout::FieldRole);
-        if (item) {
+    for (auto *section : {fractalForm, parameterForm, appearanceForm}) {
+        for (int row = 0; row < section->rowCount(); ++row) {
+            auto *item = section->itemAt(row, QFormLayout::FieldRole);
+            if (!item)
+                continue;
             if (auto *numeric = qobject_cast<QAbstractSpinBox *>(item->widget())) {
-                form->removeWidget(numeric);
-                form->setWidget(row, QFormLayout::FieldRole, new NumericSlider(numeric));
+                section->removeWidget(numeric);
+                section->setWidget(row, QFormLayout::FieldRole, new NumericSlider(numeric));
             }
         }
     }
-    coordinates = new QLabel("Ready");
+    coordinates = new QLabel("  READY   /   Drag to pan · Wheel to zoom");
     statusBar()->addWidget(coordinates, 1);
     for (auto *v : {bailout, frequency, phase, smoothing})
         connect(v, &QDoubleSpinBox::valueChanged, this, [this] { apply(); });

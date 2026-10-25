@@ -33,6 +33,7 @@ qt_add_executable(fractal WIN32
     gradient_editor.cpp
     workspace.cpp
     mainwindow.cpp
+    mainwindow_ui.cpp
     mainwindow_tools.cpp
     regression.cpp
 )
