@@ -104,6 +104,15 @@ void Playground::refreshColourPanel() {
             commit();
         });
     };
+    auto *mapping = new QComboBox;
+    mapping->addItems({"Absolute", "View-scaled"});
+    mapping->setCurrentIndex(c.trapViewScaled);
+    mapping->setToolTip("Absolute uses world units. View-scaled adjusts escape bands and convergence tolerance to the visible span, and scales orbit-trap distances.");
+    form->addRow("Colour mapping", mapping);
+    connect(mapping, &QComboBox::currentIndexChanged, colourPanel, [this, commit](int index) {
+        active()->settings.colouring.trapViewScaled = index == 1;
+        commit();
+    });
     if (c.mode == 0) {
         for (bool interior : {false, true}) {
             auto *kind = new QComboBox;
@@ -153,14 +162,6 @@ void Playground::refreshColourPanel() {
         }
     } else {
         addPalette(false);
-        auto *mapping = new QComboBox;
-        mapping->addItems({"Absolute", "View-scaled"});
-        mapping->setCurrentIndex(c.trapViewScaled);
-        form->addRow("Trap mapping", mapping);
-        connect(mapping, &QComboBox::currentIndexChanged, colourPanel, [this, commit](int index) {
-            active()->settings.colouring.trapViewScaled = index == 1;
-            commit();
-        });
         auto *shape = new QComboBox;
         shape->addItems({"Point", "Circle", "Cross"});
         shape->setCurrentIndex(c.trap);

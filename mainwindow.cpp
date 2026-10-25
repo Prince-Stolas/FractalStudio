@@ -751,7 +751,7 @@ void Playground::initializeWorkspace() {
     form->addRow("Colour phase", phase);
     smoothing = number(0, 1, 3);
     smoothing->setSingleStep(.1);
-    smoothing->setToolTip("0: discrete escape bands; 1: continuous quadratic-reference colouring.");
+    smoothing->setToolTip("0: integer iteration bands; 1: continuous escape estimates and interpolated convergence threshold crossings.");
     form->addRow("Colour smoothing", smoothing);
     for (auto *section : {fractalForm, parameterForm, appearanceForm}) {
         for (int row = 0; row < section->rowCount(); ++row) {

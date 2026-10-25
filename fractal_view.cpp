@@ -140,7 +140,9 @@ void main(){
  if(inside)count=iterations;
  bool escaped = false;
  bool converged = false;
- int convergenceCount = 0;
+ float convergenceCount = 0.0;
+ double previousResidual = 0.0;
+ double convergenceTolerance = tolerance * (trapViewScaled!=0 ? max(abs(scale),1e-15) : 1.0);
  double trapMinimum = 1e30;
  double residual = 1.0;
  if(!inside) for(int j=0;j<10000;j++) {
@@ -151,15 +153,22 @@ void main(){
      if(invalidHistory) break;
      bool stable = j >= %5-1;
      if(convergenceEnabled!=0) {
+         previousResidual=residual;
          residual=0.0;
          for(int k=0;k<%5;k++) {
              double delta=length(z-past[k]);
              residual=max(residual,delta);
-             if(delta>tolerance) stable=false;
+             if(delta>convergenceTolerance) stable=false;
          }
      }
      if(convergenceEnabled!=0 && stable) {
-         if(!converged) convergenceCount=j+1;
+         if(!converged) {
+             convergenceCount=float(j+1);
+             if(j>0 && previousResidual>convergenceTolerance && residual>0.0 && residual<previousResidual) {
+                 float fraction=clamp(log(float(previousResidual/convergenceTolerance))/log(float(previousResidual/residual)),0.0,1.0);
+                 convergenceCount-=smoothing*(1.0-fraction);
+             }
+         }
          converged=true;
      } else {
          converged=false;
@@ -179,7 +188,8 @@ void main(){
  }
  vec3 rgb=interiorColour;
  if(escaped){float t=float(count);if(radius>1.0&&!isinf(radius))t+=smoothing*(1.0-log(max(log(float(radius))*.5,.0001))/log(2.0));
- float v=t*frequency+phase;
+ float mappingScale=trapViewScaled!=0 ? float(3.0/max(abs(scale),1e-15)) : 1.0;
+ float v=t*frequency*mappingScale+phase;
  if(palette==0)rgb=.5+.5*cos(6.2831853*(v+vec3(.02,.19,.36)));
  else if(palette==1)rgb=.5+.5*cos(6.2831853*(v+vec3(.0,.08,.20)));
  else if(palette==2)rgb=.5+.5*cos(6.2831853*(v+vec3(.50,.32,.10)));
@@ -190,7 +200,7 @@ void main(){
  if(escaped && escapeSolid!=0) rgb=escapeColour;
  if(!escaped && interiorGradient!=0) {
      // Residual extrapolation is a progress metric, not a claim of convergence.
-     float progress=converged ? float(convergenceCount) : float(iterations)+log(1.0+float(max(residual/tolerance-1.0,0.0)));
+     float progress=converged ? float(convergenceCount) : float(iterations)+log(1.0+float(max(residual/convergenceTolerance-1.0,0.0)));
      float v=clamp(0.8*log(1.0+progress)/log(1.0+float(iterations))+phase,0.0,0.98);
      if(interiorPalette>=4) rgb=texture(interiorTexture,v).rgb;
      else if(interiorPalette==0) rgb=.5+.5*cos(6.2831853*(v+vec3(.02,.19,.36)));

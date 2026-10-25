@@ -431,6 +431,17 @@ bool Playground::smoke() {
     ok = colourView->apply() && ok;
     int slow = colourView->renderImage({16, 16}).pixelColor(8, 8).red();
     ok = ok && slow > fast + 20;
+    colourSettings.smoothing = 0;
+    ok = colourView->apply() && ok;
+    QImage discreteConvergence = colourView->renderImage({64, 64});
+    colourSettings.smoothing = 1;
+    ok = colourView->apply() && ok;
+    QImage smoothConvergence = colourView->renderImage({64, 64});
+    ok = ok && discreteConvergence != smoothConvergence;
+    colourSettings.colouring.trapViewScaled = !colourSettings.colouring.trapViewScaled;
+    colourView->span = 0.3;
+    ok = colourView->apply() && ok;
+    ok = ok && colourView->renderImage({64, 64}) != smoothConvergence;
     colourSettings.equation = "1-z[n]+pixel*0.01";
     ok = colourView->apply() && ok;
     QImage periodicProgress = colourView->renderImage({64, 64});
