@@ -32,6 +32,16 @@ void Playground::refreshPalettes() {
                     break;
                 }
             }
+    for (auto *view : views) {
+        for (auto item : gradientLibrary) {
+            auto entry = item.toObject();
+            if (entry["name"].toString() == view->settings.colouring.interiorGradientName) {
+                view->settings.colouring.interiorStops = entry["stops"].toArray();
+                view->update();
+                break;
+            }
+        }
+    }
     load();
 }
 
@@ -78,7 +88,14 @@ QJsonObject Playground::settingsJson(const Settings &s) const {
     for (auto it = s.negativeHistory.begin(); it != s.negativeHistory.end(); ++it)
         negative.append(
             QJsonObject{{"index", it.key()}, {"real", it.value().x()}, {"imag", it.value().y()}});
-    return {{"negativeHistory", negative},
+    const auto &c = s.colouring;
+    QJsonObject colouring{{"mode", c.mode}, {"escapeSolid", c.escapeSolid},
+                          {"interiorGradient", c.interiorGradient}, {"convergence", c.convergence},
+                          {"escapeColour", c.escapeColour.name()}, {"interiorColour", c.interiorColour.name()},
+                          {"interiorGradientName", c.interiorGradientName}, {"interiorStops", c.interiorStops},
+                          {"tolerance", c.tolerance}, {"trap", c.trap}, {"trapReal", c.trapReal},
+                          {"trapImag", c.trapImag}, {"trapRadius", c.trapRadius}};
+    return {{"colouring", colouring}, {"negativeHistory", negative},
             {"equation", s.equation},
             {"iterations", s.iterations},
             {"historySize", s.historySize},
@@ -104,6 +121,42 @@ Settings Playground::readSettings(QJsonObject o) const {
         return n;
     };
     Settings s;
+    if (o.contains("colouring")) {
+        const auto object = o["colouring"].toObject();
+        auto &c = s.colouring;
+        auto numeric = [&](QString key, double minimum, double maximum) {
+            double value = object[key].toDouble(NAN);
+            if (!std::isfinite(value) || value < minimum || value > maximum)
+                throw std::runtime_error("Invalid colouring setting");
+            return value;
+        };
+        c.mode = int(numeric("mode", 0, 1));
+        c.trap = int(numeric("trap", 0, 2));
+        c.tolerance = numeric("tolerance", 1e-12, 1);
+        c.trapReal = numeric("trapReal", -1e9, 1e9);
+        c.trapImag = numeric("trapImag", -1e9, 1e9);
+        c.trapRadius = numeric("trapRadius", 0, 1e9);
+        c.escapeSolid = object["escapeSolid"].toBool();
+        c.interiorGradient = object["interiorGradient"].toBool();
+        c.convergence = object["convergence"].toBool();
+        c.escapeColour = QColor(object["escapeColour"].toString());
+        c.interiorColour = QColor(object["interiorColour"].toString());
+        if (!c.escapeColour.isValid() || !c.interiorColour.isValid())
+            throw std::runtime_error("Invalid classification colour");
+        c.interiorGradientName = object["interiorGradientName"].toString();
+        c.interiorStops = object["interiorStops"].toArray();
+        double previous = -1;
+        for (auto stop : c.interiorStops) {
+            auto entry = stop.toObject();
+            double position = entry["position"].toDouble(NAN);
+            if (!std::isfinite(position) || position < previous || position < 0 || position > 1 ||
+                !QColor(entry["colour"].toString()).isValid())
+                throw std::runtime_error("Invalid interior gradient");
+            previous = position;
+        }
+        if (!c.interiorStops.isEmpty() && c.interiorStops.size() < 2)
+            throw std::runtime_error("Interior gradient needs two stops");
+    }
     if (o.contains("names")) {
         s.names.clear();
         for (auto name : o["names"].toArray())

@@ -7,7 +7,18 @@ struct Variable {
     QString equation = "0";
     int modifiers = 0;
 };
+struct Colouring {
+    int mode = 0; // Escape / convergence, or orbit trap.
+    bool escapeSolid = false, interiorGradient = false, convergence = false;
+    QColor escapeColour = Qt::white, interiorColour = Qt::black;
+    QString interiorGradientName = "Default";
+    QJsonArray interiorStops;
+    double tolerance = 1e-8;
+    int trap = 0; // Point, circle, cross.
+    double trapReal = 0, trapImag = 0, trapRadius = 1;
+};
 struct Settings {
+    Colouring colouring;
     QString equation = "z[n]^p+c";
     QStringList names = {"", "", "c", "", "p"};
     int iterations = 128, palette = 0;

@@ -356,7 +356,7 @@ bool Playground::smoke() {
     ok = active()->apply() && ok;
     regular.equation = "z[n]^p+c";
     ok = !active()->apply() && ok;
-    ok = ok && Settings().historySize == 1 && variableDock->minimumWidth() >= 440;
+    ok = ok && Settings().historySize == 1 && variableDock->minimumWidth() >= 320 && variableDock->minimumWidth() <= 360;
     auto components = ComplexExpression::evaluate("real(3+2i)+imag(1-4i)+2i", [](QString){return std::complex<double>(0);});
     ok = ok && std::abs(components - std::complex<double>(-1, 2)) < 1e-9;
     active()->settings = Settings();
@@ -371,6 +371,50 @@ bool Playground::smoke() {
     ok = active()->apply() && ok;
     ok = ok && active()->renderImage({16,16}).pixelColor(8,8) != QColor(255,0,255);
     ok = ok && readSettings(settingsJson(active()->settings)).historySize == 3;
+    auto *colourView = active();
+    colourView->settings = Settings();
+    auto &colourSettings = colourView->settings;
+    colourSettings.colouring.escapeSolid = true;
+    colourSettings.colouring.escapeColour = QColor("#ff0000");
+    colourSettings.colouring.interiorColour = QColor("#00ff00");
+    colourSettings.equation = "n+1";
+    colourSettings.iterations = 16;
+    colourSettings.bailout = 15.5;
+    ok = colourView->apply() && ok;
+    ok = ok && colourView->renderImage({16, 16}).pixelColor(8, 8) == QColor("#ff0000");
+    colourSettings.equation = "0.25";
+    ok = colourView->apply() && ok;
+    ok = ok && colourView->renderImage({16, 16}).pixelColor(8, 8) == QColor("#00ff00");
+    colourSettings.colouring.convergence = true;
+    colourSettings.colouring.interiorGradient = true;
+    colourSettings.colouring.interiorStops = QJsonArray{
+        QJsonObject{{"position", 0}, {"colour", "#0000ff"}},
+        QJsonObject{{"position", 1}, {"colour", "#0000ff"}}};
+    colourSettings.equation = "z[n]*0.1+0.1";
+    ok = colourView->apply() && ok;
+    ok = ok && colourView->renderImage({16, 16}).pixelColor(8, 8) == QColor("#0000ff");
+    colourSettings.equation = "1-z[n]";
+    ok = colourView->apply() && ok;
+    ok = ok && colourView->renderImage({16, 16}).pixelColor(8, 8) == QColor("#00ff00");
+    colourSettings.colouring.mode = 1;
+    colourSettings.palette = 5;
+    colourSettings.gradient = colourSettings.colouring.interiorStops;
+    for (int shape = 0; shape < 3; ++shape) {
+        colourSettings.colouring.trap = shape;
+        ok = colourView->apply() && ok;
+        ok = ok && colourView->renderImage({16, 16}).pixelColor(8, 8) == QColor("#0000ff");
+    }
+    auto colourRoundtrip = readSettings(settingsJson(colourSettings));
+    ok = ok && settingsJson(colourRoundtrip) == settingsJson(colourSettings);
+    auto invalidColour = settingsJson(colourSettings);
+    auto invalidOptions = invalidColour["colouring"].toObject();
+    invalidOptions["tolerance"] = -1;
+    invalidColour["colouring"] = invalidOptions;
+    try {
+        readSettings(invalidColour);
+        ok = false;
+    } catch (const std::exception &) {
+    }
     Settings anotherView;
     ok = ok && anotherView.negativeHistory.isEmpty();
     if (!ok)

@@ -433,6 +433,7 @@ void Playground::choosePreset(int index) {
     s.smoothing = previous.smoothing;
     s.gradient = previous.gradient;
     s.gradientName = previous.gradientName;
+    s.colouring = previous.colouring;
     switch (index) {
     case 1:
         s.variables[3].source = Pixel;
@@ -490,6 +491,7 @@ bool Playground::makeJulia(View *source, View *destination) {
         s.smoothing = previous.smoothing;
         s.gradient = previous.gradient;
         s.gradientName = previous.gradientName;
+        s.colouring = previous.colouring;
         s.variables[3].source = Pixel;
         s.variables[2] = previous.variables[2];
         s.variables[2].source = Mouse;
@@ -681,7 +683,7 @@ void Playground::initializeWorkspace() {
     form->addRow(error);
     variableDock = new QDockWidget("Variables", this);
     variableDock->setObjectName("variableEditor");
-    variableDock->setMinimumWidth(440);
+    variableDock->setMinimumWidth(340);
     variableDock->setAllowedAreas(Qt::AllDockWidgetAreas);
     variableDock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable |
                               QDockWidget::DockWidgetFloatable);
@@ -732,11 +734,111 @@ void Playground::initializeWorkspace() {
     form->addRow(new QLabel("<b>Colour mapping</b>"));
     auto *gradients = new QPushButton("Edit gradient library…");
     form->addRow(gradients);
+    auto *colourOptions = new QPushButton("Classification and orbit traps…");
+    form->addRow(colourOptions);
+    connect(colourOptions, &QPushButton::clicked, this, [this] {
+        QDialog dialog(this);
+        dialog.setWindowTitle("Colour classification");
+        auto *layout = new QFormLayout(&dialog);
+        auto value = active()->settings.colouring;
+        QComboBox mode, escape, interior, trap, interiorPalette;
+        mode.addItems({"Escape / fixed-point speed", "Orbit trap"});
+        escape.addItems({"Gradient", "Solid colour"});
+        interior.addItems({"Solid fallback", "Convergence-speed gradient"});
+        trap.addItems({"Point", "Circle", "Cross"});
+        for (auto entry : gradientLibrary)
+            interiorPalette.addItem(entry.toObject()["name"].toString());
+        mode.setCurrentIndex(value.mode);
+        escape.setCurrentIndex(value.escapeSolid);
+        interior.setCurrentIndex(value.interiorGradient);
+        trap.setCurrentIndex(value.trap);
+        interiorPalette.setCurrentText(value.interiorGradientName);
+        QCheckBox convergence("Enable fixed-point detection (heuristic)");
+        convergence.setChecked(value.convergence);
+        convergence.setToolTip("Compares every retained value against the next value. No early termination: n-dependent equations and seeds may move again. Periodic bounded points retain the fallback colour.");
+        QDoubleSpinBox tolerance, real, imag, radius;
+        tolerance.setDecimals(12);
+        tolerance.setRange(1e-12, 1);
+        tolerance.setValue(value.tolerance);
+        for (auto *spin : {&real, &imag, &radius}) {
+            spin->setDecimals(6);
+            spin->setRange(-1e9, 1e9);
+        }
+        radius.setMinimum(0);
+        real.setValue(value.trapReal);
+        imag.setValue(value.trapImag);
+        radius.setValue(value.trapRadius);
+        QPushButton escapeColour(value.escapeColour.name()), interiorColour(value.interiorColour.name());
+        auto choose = [&](QPushButton *button, QColor *colour) {
+            connect(button, &QPushButton::clicked, &dialog, [&, button, colour] {
+                QColor selected = QColorDialog::getColor(*colour, &dialog);
+                if (selected.isValid()) {
+                    *colour = selected;
+                    button->setText(selected.name());
+                }
+            });
+        };
+        choose(&escapeColour, &value.escapeColour);
+        choose(&interiorColour, &value.interiorColour);
+        layout->addRow("Colouring mode", &mode);
+        layout->addRow("Escaping points", &escape);
+        layout->addRow("Escape colour", &escapeColour);
+        layout->addRow("Bounded / interior", &interior);
+        layout->addRow("Fallback colour", &interiorColour);
+        layout->addRow(&convergence);
+        layout->addRow("Fixed-point tolerance", &tolerance);
+        layout->addRow("Interior gradient", &interiorPalette);
+        layout->addRow("Trap shape", &trap);
+        layout->addRow("Trap centre real", &real);
+        layout->addRow("Trap centre imaginary", &imag);
+        layout->addRow("Circle radius", &radius);
+        auto visibility = [&] {
+            bool traps = mode.currentIndex() == 1;
+            layout->setRowVisible(&escape, !traps);
+            layout->setRowVisible(&escapeColour, !traps && escape.currentIndex() == 1);
+            layout->setRowVisible(&interior, !traps);
+            layout->setRowVisible(&interiorColour, !traps);
+            layout->setRowVisible(&convergence, !traps);
+            layout->setRowVisible(&tolerance, !traps && convergence.isChecked());
+            layout->setRowVisible(&interiorPalette, !traps && interior.currentIndex() == 1);
+            for (QWidget *widget : QList<QWidget *>{&trap, &real, &imag})
+                layout->setRowVisible(widget, traps);
+            layout->setRowVisible(&radius, traps && trap.currentIndex() == 1);
+        };
+        for (auto *combo : {&mode, &escape, &interior, &trap})
+            connect(combo, &QComboBox::currentIndexChanged, &dialog, visibility);
+        connect(&interior, &QComboBox::currentIndexChanged, &dialog, [&](int index) {
+            if (index == 1)
+                convergence.setChecked(true);
+        });
+        connect(&convergence, &QCheckBox::toggled, &dialog, visibility);
+        visibility();
+        QDialogButtonBox buttons(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+        layout->addRow(&buttons);
+        connect(&buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+        connect(&buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        if (dialog.exec() != QDialog::Accepted)
+            return;
+        value.mode = mode.currentIndex();
+        value.escapeSolid = escape.currentIndex() == 1;
+        value.interiorGradient = interior.currentIndex() == 1;
+        value.convergence = convergence.isChecked();
+        value.tolerance = tolerance.value();
+        value.trap = trap.currentIndex();
+        value.trapReal = real.value();
+        value.trapImag = imag.value();
+        value.trapRadius = radius.value();
+        value.interiorGradientName = interiorPalette.currentText();
+        if (interiorPalette.currentIndex() >= 0)
+            value.interiorStops = gradientLibrary[interiorPalette.currentIndex()].toObject()["stops"].toArray();
+        active()->settings.colouring = value;
+        active()->apply();
+    });
     connect(gradients, &QPushButton::clicked, this, [this] { gradientDialog(); });
     palette = new QComboBox;
     palette->addItems(
         {"Spectrum", "Ember", "Ocean", "Monochrome", "Custom gradient"});
-    form->addRow("Palette", palette);
+    form->addRow("Exterior / trap gradient", palette);
     frequency = number(.00001, 10);
     frequency->setSingleStep(.005);
     phase = number(-100, 100);
