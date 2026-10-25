@@ -72,6 +72,7 @@ struct Settings {
     int iterations=400, palette=0;
     double p=2,bailout=16,frequency=.025,phase=0,smoothing=1;
     QJsonArray gradient={QJsonObject{{"position",0.0},{"colour","#ffffff"}},QJsonObject{{"position",.25},{"colour","#5599ff"}},QJsonObject{{"position",.65},{"colour","#e060bb"}},QJsonObject{{"position",1.0},{"colour","#000000"}}};
+    QMap<int,QPointF> negativeHistory;
     QString gradientName="Default";
     bool orbit=false;int orbitSteps=100;
     QVector<Variable> variables={{Constant,1,0,"0",int(Qt::ShiftModifier)},
@@ -99,7 +100,7 @@ private:
     void drawOrbit(QPainter &painter,QSize size){
         if(!settings.orbit||!hasPoint)return;
         using C=std::complex<double>;C pixel(px,py),z(0);int iteration=0;QVector<C> past;
-        auto historyValue=[&](int i){return past.at(i);};
+        auto historyValue=[&](int i){if(i<0){auto value=settings.negativeHistory.value(i);return C(value.x(),value.y());}return past.at(i);};
         auto value=[&](QString name)->C{if(name=="z"||name=="z_n")throw std::runtime_error("Use z[index]");if(name=="pixel")return pixel;if(name=="p")return C(settings.p);if(name=="n")return C(iteration);int index=settings.names.indexOf(name);if(index<0)throw std::runtime_error("Unknown variable");const auto &v=settings.variables[index];return v.source==Pixel?pixel:C(v.real,v.imag);};
         const auto &start=settings.variables[3];
         try{z=start.source==Pixel?pixel:start.source==Expression?ComplexExpression::evaluate(start.equation,value):C(start.real,start.imag);
@@ -108,14 +109,15 @@ private:
             for(iteration=0;iteration<settings.orbitSteps;++iteration){if(iteration==0)past.append(z);C next=ComplexExpression::evaluate(settings.equation,value,historyValue);past.append(next);if(!std::isfinite(next.real())||!std::isfinite(next.imag()))break;QPointF a=screen(z),b=screen(next);if(std::abs(a.x())<1e7&&std::abs(a.y())<1e7&&std::abs(b.x())<1e7&&std::abs(b.y())<1e7){painter.drawLine(a,b);painter.drawEllipse(b,2,2);}z=next;if(std::abs(z)>settings.bailout)break;}
         }catch(const std::exception &e){if(status)status(e.what());}
     }
-    QString declarations()const{QString out;for(int i=0;i<settings.variables.size();++i)out+="uniform dvec2 input"+QString::number(i)+";\n";return out;}
+    QString negativeDeclarations()const{QString out;int i=0;for(auto it=settings.negativeHistory.begin();it!=settings.negativeHistory.end();++it)out+="uniform dvec2 negative"+QString::number(i++)+";\n";out+="dvec2 negativeAt(double index){";i=0;for(auto it=settings.negativeHistory.begin();it!=settings.negativeHistory.end();++it)out+="if(index=="+QString::number(it.key())+".0)return negative"+QString::number(i++)+";";return out+"return dvec2(0);}\n";}
+    QString declarations()const{QString out=negativeDeclarations();for(int i=0;i<settings.variables.size();++i)out+="uniform dvec2 input"+QString::number(i)+";\n";return out;}
     QString bindings()const{QString out;for(int i=0;i<settings.variables.size();++i)out+="dvec2 var"+QString::number(i)+"="+(settings.variables[i].source==Pixel?QString("pixel"):"input"+QString::number(i))+";\n";return out;}
     QString fragment()const{return QString(R"GLSL(#version 400 core
 out vec4 frag;
 uniform dvec2 center,constantC,paramA,paramB,z0;
 %3
  dvec2 past[10];double currentN;bool invalidHistory=false;
- dvec2 historyAt(dvec2 index){if(index.y!=0.0||isnan(index.x)||isinf(index.x)||index.x<max(0.0,currentN-9.0)||index.x>currentN||floor(index.x)!=index.x){invalidHistory=true;return dvec2(0);}return past[int(index.x)%10];}
+ dvec2 historyAt(dvec2 index){if(index.y!=0.0||isnan(index.x)||isinf(index.x)||floor(index.x)!=index.x){invalidHistory=true;return dvec2(0);}if(index.x<0.0)return negativeAt(index.x);if(index.x<max(0.0,currentN-9.0)||index.x>currentN){invalidHistory=true;return dvec2(0);}return past[clamp(int(mod(index.x,10.0)),0,9)];}
  dvec2 cmod(dvec2 x,dvec2 y){if(y.y!=0.0||y.x==0.0){invalidHistory=true;return dvec2(0);}return x-y.x*floor(x/y.x);}
 uniform double scale,p,bailout;
 uniform vec2 resolution,marker;
@@ -192,6 +194,7 @@ protected:
         const bool quadratic=expr=="(cpow(z,dvec2(p,0.0))+c)"&&initial=="dvec2(0.0,0.0)"&&settings.p==2&&settings.variables[2].source==Pixel&&settings.bailout>=2;
         shader->setUniformValue("quadratic",int(quadratic));
         uniform2("center",double(cx),double(cy));uniform("scale",double(span));uniform("p",settings.p);uniform("bailout",settings.bailout);
+        int negativeIndex=0;for(auto it=settings.negativeHistory.begin();it!=settings.negativeHistory.end();++it)uniform2(qPrintable(QString("negative%1").arg(negativeIndex++)),it.value().x(),it.value().y());
         const char *names[]={"paramA","paramB","constantC","z0"};
         for(int i=0;i<4;++i)uniform2(names[i],settings.variables[i].real,settings.variables[i].imag);
         for(int i=0;i<settings.variables.size();++i)uniform2(("input"+QString::number(i)).toLatin1().constData(),settings.variables[i].real,settings.variables[i].imag);
@@ -446,7 +449,7 @@ public:
             auto *item=form->itemAt(row,QFormLayout::FieldRole);
             if(item){if(auto *numeric=qobject_cast<QAbstractSpinBox*>(item->widget())){form->removeWidget(numeric);form->setWidget(row,QFormLayout::FieldRole,new NumericSlider(numeric));}}
         }
-        auto *help=new QLabel("<b>Numeric sliders</b><br>Press ↔ next to any number to enable a slider and set its minimum and maximum. Typed values remain available.<br><br><b>Equation language</b><br>z[n]: current iterate; 10 values retained from z[max(0,n-9)] through z[n]. Use z[n-n%2] for the latest even-indexed value. Negative, future, fractional or expired indices render magenta. Bare z and z_n are invalid.<br>pixel: point in this view<br>a, b, c: independently selected sources<br>p: exponent · n: iteration (starts at 0)<br>a, b: editable complex parameters · i · pi<br>Operators: + − * / % ^ and parentheses<br>Functions: sin, cos, exp, log, conj, abs, norm, floor, ceil<br>abs is component-wise; norm is magnitude.<br><br><b>Navigation</b><br>Drag left: pan · wheel: zoom at cursor<br>Right-click/drag: pick variables in Mouse mode<br>Each variable has configurable Shift/Ctrl/Alt modifiers.<br>Mouse-picked variables use only their own view. Cross-view picking requires an explicit Picking links route.<br>Initial z has its own source dropdown; Equation mode accepts a, b, c and pixel.<br>Home: reset focused view · Tab: sidebar<br><br>There is no zoom cap. Numerical precision eventually limits detail. Double precision is used for arithmetic; transcendental functions use float precision.<br><br>Presets are editable equations, not separate renderers. Escape-time colouring is used for all formulas; convergent formulas may need different bailout settings.");help->setWordWrap(true);help->setTextFormat(Qt::RichText);form->addRow(help);
+        auto *help=new QLabel("<b>Numeric sliders</b><br>Press ↔ next to any number to enable a slider and set its minimum and maximum. Typed values remain available.<br><br><b>Equation language</b><br>z[n]: current iterate; 10 values retained from z[max(0,n-9)] through z[n]. Use z[n-n%2] for the latest even-indexed value. Negative indices default to zero; override them in Tools / Workspace → Initial negative z values. Future, fractional or expired nonnegative indices render magenta. Bare z and z_n are invalid.<br>pixel: point in this view<br>a, b, c: independently selected sources<br>p: exponent · n: iteration (starts at 0)<br>a, b: editable complex parameters · i · pi<br>Operators: + − * / % ^ and parentheses<br>Functions: sin, cos, exp, log, conj, abs, norm, floor, ceil<br>abs is component-wise; norm is magnitude.<br><br><b>Navigation</b><br>Drag left: pan · wheel: zoom at cursor<br>Right-click/drag: pick variables in Mouse mode<br>Each variable has configurable Shift/Ctrl/Alt modifiers.<br>Mouse-picked variables use only their own view. Cross-view picking requires an explicit Picking links route.<br>Initial z has its own source dropdown; Equation mode accepts a, b, c and pixel.<br>Home: reset focused view · Tab: sidebar<br><br>There is no zoom cap. Numerical precision eventually limits detail. Double precision is used for arithmetic; transcendental functions use float precision.<br><br>Presets are editable equations, not separate renderers. Escape-time colouring is used for all formulas; convergent formulas may need different bailout settings.");help->setWordWrap(true);help->setTextFormat(Qt::RichText);form->addRow(help);
         coordinates=new QLabel("Click a point to inspect its complex coordinate");statusBar()->addWidget(coordinates,1);
         for(auto *v:{exponent,bailout,frequency,phase,smoothing})connect(v,&QDoubleSpinBox::valueChanged,this,[this]{apply();});
         connect(iterations,&QSpinBox::valueChanged,this,[this]{apply();});connect(palette,&QComboBox::currentIndexChanged,this,[this]{apply();});
@@ -523,6 +526,11 @@ public:
         active()->settings.equation="z[n-n%2]*0.1+0.1";ok=active()->apply()&&ok;QImage rolling=active()->renderImage({32,32});ok=ok&&!rolling.isNull()&&rolling.pixelColor(16,16)!=QColor(255,0,255);
         active()->settings.equation="z[0]*0.1+0.1";ok=active()->apply()&&ok;QImage expired=active()->renderImage({32,32});ok=ok&&expired.pixelColor(16,16)==QColor(255,0,255);
         active()->settings.equation="z[n+1]";ok=active()->apply()&&ok;QImage future=active()->renderImage({32,32});ok=ok&&future.pixelColor(16,16)==QColor(255,0,255);
+        active()->settings.equation="z[n]^2+z[n-1]*0.1";active()->settings.negativeHistory.clear();ok=active()->apply()&&ok;QImage zeroPast=active()->renderImage({32,32});ok=ok&&zeroPast.pixelColor(16,16)!=QColor(255,0,255);
+        active()->settings.equation="z[-1]";active()->settings.negativeHistory[-1]=QPointF(100,2);ok=active()->apply()&&ok;QImage seeded=active()->renderImage({32,32});ok=ok&&seeded.pixelColor(16,16)!=zeroPast.pixelColor(16,16)&&seeded.pixelColor(16,16)!=QColor(255,0,255);
+        Settings seedRoundTrip=readSettings(settingsJson(active()->settings));ok=ok&&seedRoundTrip.negativeHistory.value(-1)==QPointF(100,2);
+        auto defaultNegative=ComplexExpression::evaluate("z[-1]",[](QString){return std::complex<double>(0);});ok=ok&&defaultNegative==std::complex<double>(0);
+        auto customNegative=ComplexExpression::evaluate("z[-1]+z[0]",[](QString){return std::complex<double>(0);},[](int index){return index<0?std::complex<double>(2,3):std::complex<double>(1,0);});ok=ok&&customNegative==std::complex<double>(3,3);
         try{Equation::compile("z; invalid");ok=false;}catch(const std::exception &){}
         if(!ok)qWarning()<<"Playground regression check failed"<<error->text()<<active()->lastError;
         return ok;

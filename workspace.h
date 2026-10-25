@@ -2,6 +2,7 @@
 #include <QtWidgets>
 #include <complex>
 #include <functional>
+#include <limits>
 
 class ComplexExpression {
     using C=std::complex<double>;
@@ -23,7 +24,7 @@ class ComplexExpression {
         }
         while(pos<text.size()&&(text[pos].isLetterOrNumber()||text[pos]=='_'))++pos;
         QString name=text.mid(start,pos-start);
-        if(name=="z"&&eat('[')){C index=sum();if(!eat(']'))throw std::runtime_error("Expected closing index bracket");double n=variable("n").real();if(index.imag()!=0||!std::isfinite(index.real())||std::floor(index.real())!=index.real())throw std::runtime_error("z index must be a finite real integer");if(index.real()<0)throw std::runtime_error("Negative z index has no history");if(index.real()>n)throw std::runtime_error("Future z index exceeds n");if(index.real()<n-9)throw std::runtime_error("z index is older than the 10-value history window");if(!history)throw std::runtime_error("z history is unavailable");return history(int(index.real()));}
+        if(name=="z"&&eat('[')){C index=sum();if(!eat(']'))throw std::runtime_error("Expected closing index bracket");double n=variable("n").real();if(index.imag()!=0||!std::isfinite(index.real())||std::floor(index.real())!=index.real())throw std::runtime_error("z index must be a finite real integer");if(index.real()<0){if(index.real()<double(std::numeric_limits<int>::min()))return C(0);return history?history(int(index.real())):C(0);}if(index.real()>n)throw std::runtime_error("Future z index exceeds n");if(index.real()<n-9)throw std::runtime_error("z index is older than the 10-value history window");if(!history)throw std::runtime_error("z history is unavailable");return history(int(index.real()));}
         if(eat('(')){C x=sum();if(!eat(')'))throw std::runtime_error("Expected parenthesis");
             if(name=="floor")return C(std::floor(x.real()),std::floor(x.imag()));
             if(name=="ceil")return C(std::ceil(x.real()),std::ceil(x.imag()));
