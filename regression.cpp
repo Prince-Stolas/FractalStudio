@@ -395,7 +395,7 @@ bool Playground::smoke() {
     ok = ok && colourView->renderImage({16, 16}).pixelColor(8, 8) == QColor("#0000ff");
     colourSettings.equation = "1-z[n]";
     ok = colourView->apply() && ok;
-    ok = ok && colourView->renderImage({16, 16}).pixelColor(8, 8) == QColor("#00ff00");
+    ok = ok && colourView->renderImage({16, 16}).pixelColor(8, 8) == QColor("#0000ff");
     colourSettings.colouring.mode = 1;
     colourSettings.palette = 5;
     colourSettings.gradient = colourSettings.colouring.interiorStops;
@@ -431,6 +431,39 @@ bool Playground::smoke() {
     ok = colourView->apply() && ok;
     int slow = colourView->renderImage({16, 16}).pixelColor(8, 8).red();
     ok = ok && slow > fast + 20;
+    colourSettings.equation = "1-z[n]+pixel*0.01";
+    ok = colourView->apply() && ok;
+    QImage periodicProgress = colourView->renderImage({64, 64});
+    ok = ok && periodicProgress.pixelColor(32, 32).red() > slow;
+    colourSettings.equation = "z[n]*0.99+pixel*0.001";
+    ok = colourView->apply() && ok;
+    QImage budgetProgress = colourView->renderImage({64, 64});
+    ok = ok && budgetProgress.pixelColor(16, 32) != QColor(Qt::black);
+    int progressMinimum = 255, progressMaximum = 0;
+    for (int y = 0; y < budgetProgress.height(); ++y)
+        for (int x = 0; x < budgetProgress.width(); ++x) {
+            int value = budgetProgress.pixelColor(x, y).red();
+            progressMinimum = qMin(progressMinimum, value);
+            progressMaximum = qMax(progressMaximum, value);
+        }
+    ok = ok && progressMaximum > progressMinimum;
+    colourSettings.colouring.interiorPalette = 0;
+    QImage spectrumInterior = colourView->renderImage({64, 64});
+    colourSettings.colouring.interiorPalette = 2;
+    QImage oceanInterior = colourView->renderImage({64, 64});
+    ok = ok && spectrumInterior.pixelColor(16, 32) != oceanInterior.pixelColor(16, 32);
+    colourSettings.palette = 1;
+    ok = ok && colourView->renderImage({64, 64}) == oceanInterior;
+    const auto builds = colourView->shaderBuildCount;
+    const auto exteriorUploads = colourView->gradientUploadCount;
+    const auto interiorUploads = colourView->interiorUploadCount;
+    colourSettings.phase += 0.01;
+    ok = colourView->apply() && ok;
+    colourView->renderImage({64, 64});
+    colourView->renderImage({64, 64});
+    ok = ok && builds == colourView->shaderBuildCount &&
+         exteriorUploads == colourView->gradientUploadCount && interiorUploads == colourView->interiorUploadCount;
+    colourSettings.colouring.trapViewScaled = false;
     auto colourRoundtrip = readSettings(settingsJson(colourSettings));
     ok = ok && settingsJson(colourRoundtrip) == settingsJson(colourSettings);
     auto invalidColour = settingsJson(colourSettings);

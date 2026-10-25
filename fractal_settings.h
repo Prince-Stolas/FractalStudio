@@ -14,6 +14,8 @@ struct Colouring {
     QString interiorGradientName = "Default";
     QJsonArray interiorStops;
     double tolerance = 1e-6;
+    int interiorPalette = 4; // Legacy workspaces used only custom interior gradients.
+    bool trapViewScaled = true;
     int trap = 0; // Point, circle, cross.
     double trapReal = 0, trapImag = 0, trapRadius = 1;
 };

@@ -15,11 +15,13 @@ class View : public QOpenGLWidget, protected QOpenGLFunctions_4_0_Core {
     std::function<void(QString)> status;
     std::function<void()> activated;
     QString lastError;
+    quint64 shaderBuildCount = 0, gradientUploadCount = 0, interiorUploadCount = 0;
 
   private:
     QOpenGLShaderProgram *shader = nullptr;
-    GLuint gradientTexture = 0;
-    QJsonArray uploadedGradient;
+    GLuint gradientTexture = 0, interiorTexture = 0;
+    QJsonArray uploadedGradient, uploadedInterior;
+    QString compiledFragment;
     GLuint vao = 0;
     QPoint last;
     bool dragging = false, picking = false, hasPoint = false;

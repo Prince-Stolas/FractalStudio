@@ -93,6 +93,7 @@ QJsonObject Playground::settingsJson(const Settings &s) const {
                           {"interiorGradient", c.interiorGradient}, {"convergence", c.convergence},
                           {"escapeColour", c.escapeColour.name()}, {"interiorColour", c.interiorColour.name()},
                           {"interiorGradientName", c.interiorGradientName}, {"interiorStops", c.interiorStops},
+                          {"interiorPalette", c.interiorPalette}, {"trapViewScaled", c.trapViewScaled},
                           {"tolerance", c.tolerance}, {"trap", c.trap}, {"trapReal", c.trapReal},
                           {"trapImag", c.trapImag}, {"trapRadius", c.trapRadius}};
     return {{"colouring", colouring}, {"negativeHistory", negative},
@@ -130,6 +131,8 @@ Settings Playground::readSettings(QJsonObject o) const {
                 throw std::runtime_error("Invalid colouring setting");
             return value;
         };
+        c.interiorPalette = object.contains("interiorPalette") ? int(numeric("interiorPalette", 0, 4)) : 4;
+        c.trapViewScaled = object["trapViewScaled"].toBool(true);
         c.mode = int(numeric("mode", 0, 1));
         c.trap = int(numeric("trap", 0, 2));
         c.tolerance = numeric("tolerance", 1e-12, 1);

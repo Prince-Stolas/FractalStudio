@@ -105,7 +105,7 @@ uniform vec2 resolution,marker;
 uniform int iterations,aSource,bSource,cSource,palette,showMarker,quadratic;
 uniform float frequency,phase,smoothing;
 uniform sampler1D gradientTexture;
-uniform int colourMode, escapeSolid, interiorGradient, convergenceEnabled, trapShape;
+uniform int colourMode, escapeSolid, interiorGradient, convergenceEnabled, trapShape, interiorPalette, trapViewScaled;
 uniform vec3 escapeColour, interiorColour;
 uniform double tolerance, trapReal, trapImag, trapRadius;
 uniform sampler1D interiorTexture;
@@ -142,6 +142,7 @@ void main(){
  bool converged = false;
  int convergenceCount = 0;
  double trapMinimum = 1e30;
+ double residual = 1.0;
  if(!inside) for(int j=0;j<10000;j++) {
      if(j>=iterations) break;
      n=double(j);
@@ -149,9 +150,12 @@ void main(){
      z=%2;
      if(invalidHistory) break;
      bool stable = j >= %5-1;
-     if(stable && convergenceEnabled!=0) {
+     if(convergenceEnabled!=0) {
+         residual=0.0;
          for(int k=0;k<%5;k++) {
-             if(length(z-past[k])>tolerance) stable=false;
+             double delta=length(z-past[k]);
+             residual=max(residual,delta);
+             if(delta>tolerance) stable=false;
          }
      }
      if(convergenceEnabled!=0 && stable) {
@@ -160,12 +164,14 @@ void main(){
      } else {
          converged=false;
      }
-     past[(j+1) % %5]=z;
-     dvec2 offset=z-dvec2(trapReal,trapImag);
-     double distance=length(offset);
-     if(trapShape==1) distance=abs(distance-trapRadius);
-     if(trapShape==2) distance=min(abs(offset.x),abs(offset.y));
-     trapMinimum=min(trapMinimum,distance);
+     if(convergenceEnabled!=0 || %6) past[(j+1) % %5]=z;
+     if(colourMode==1) {
+         dvec2 offset=z-dvec2(trapReal,trapImag);
+         double distance=length(offset);
+         if(trapShape==1) distance=abs(distance-trapRadius);
+         if(trapShape==2) distance=min(abs(offset.x),abs(offset.y));
+         trapMinimum=min(trapMinimum,distance);
+     }
      radius=dot(z,z);
      count=j+1;
      escaped=isnan(radius)||isinf(radius)||radius>bailout*bailout;
@@ -182,12 +188,18 @@ void main(){
  if(palette>=4)rgb=gradient(1.0-abs(2.0*fract(v*.5)-1.0));
  }
  if(escaped && escapeSolid!=0) rgb=escapeColour;
- if(!escaped && converged && interiorGradient!=0) {
-     float v=log(1.0+float(convergenceCount))/log(1.0+float(iterations));
-     rgb=texture(interiorTexture,clamp(v+phase,0.0,1.0)).rgb;
+ if(!escaped && interiorGradient!=0) {
+     // Residual extrapolation is a progress metric, not a claim of convergence.
+     float progress=converged ? float(convergenceCount) : float(iterations)+log(1.0+float(max(residual/tolerance-1.0,0.0)));
+     float v=clamp(0.8*log(1.0+progress)/log(1.0+float(iterations))+phase,0.0,0.98);
+     if(interiorPalette>=4) rgb=texture(interiorTexture,v).rgb;
+     else if(interiorPalette==0) rgb=.5+.5*cos(6.2831853*(v+vec3(.02,.19,.36)));
+     else if(interiorPalette==1) rgb=.5+.5*cos(6.2831853*(v+vec3(.0,.08,.20)));
+     else if(interiorPalette==2) rgb=.5+.5*cos(6.2831853*(v+vec3(.50,.32,.10)));
+     else rgb=vec3(.5+.5*cos(6.2831853*v));
  }
  if(colourMode==1) {
-     double reference=max(abs(scale)*0.1,1e-15);
+     double reference=trapViewScaled!=0 ? max(abs(scale)*0.1,1e-15) : 1.0;
      float proximity=log(1.0+float(reference/max(trapMinimum,reference*1e-12)));
      float v=clamp(1.0-exp(-proximity*max(frequency/0.025,0.001))+phase,0.0,1.0);
      if(palette>=4) rgb=gradient(v);
@@ -200,15 +212,19 @@ void main(){
  if(invalidHistory)rgb=vec3(1.0,0.0,1.0);
  frag=vec4(rgb,1);
 })GLSL")
-        .arg(initial, expr, declarations(), bindings()).arg(settings.historySize);
+        .arg(initial, expr, declarations(), bindings()).arg(settings.historySize)
+        .arg(expr.contains("historyAt(") ? "true" : "false");
 }
 
 bool View::rebuild() {
+    const QString source = fragment();
+    if (shader && source == compiledFragment)
+        return true;
     auto *candidate = new QOpenGLShaderProgram;
     const char *vertex = "#version 400 core\nvoid main(){vec2 "
                          "p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.-1.,0,1);}";
     if (!candidate->addShaderFromSourceCode(QOpenGLShader::Vertex, vertex) ||
-        !candidate->addShaderFromSourceCode(QOpenGLShader::Fragment, fragment()) ||
+        !candidate->addShaderFromSourceCode(QOpenGLShader::Fragment, source) ||
         !candidate->link()) {
         lastError = candidate->log();
         delete candidate;
@@ -216,6 +232,8 @@ bool View::rebuild() {
     }
     delete shader;
     shader = candidate;
+    compiledFragment = source;
+    ++shaderBuildCount;
     lastError.clear();
     return true;
 }
@@ -266,14 +284,18 @@ void View::paintGL() {
     float w = exportSize.isEmpty() ? width() * ratio : exportSize.width(),
           h = exportSize.isEmpty() ? height() * ratio : exportSize.height();
     glViewport(0, 0, int(w), int(h));
-    const bool quadratic = expr == "(cpow(z,dvec2(p,0.0))+c)" && initial == "dvec2(0.0,0.0)" &&
-                           settings.variables[2].source == Pixel && settings.bailout >= 2;
-    shader->setUniformValue("quadratic", int(quadratic && !settings.colouring.convergence && settings.colouring.mode == 0));
+    const bool quadratic = expr == "(cpow(z,var4)+var2)" &&
+                           initial == "dvec2(0.0,0.0)" && settings.variables[2].source == Pixel &&
+                           settings.variables[4].source != Pixel && settings.variables[4].real == 2 &&
+                           settings.variables[4].imag == 0 && settings.bailout >= 2;
+    shader->setUniformValue("quadratic", int(quadratic && !settings.colouring.interiorGradient && settings.colouring.mode == 0));
     const auto &colouring = settings.colouring;
     shader->setUniformValue("colourMode", colouring.mode);
     shader->setUniformValue("escapeSolid", int(colouring.escapeSolid));
     shader->setUniformValue("interiorGradient", int(colouring.interiorGradient));
-    shader->setUniformValue("convergenceEnabled", int(colouring.convergence));
+    shader->setUniformValue("convergenceEnabled", int(colouring.interiorGradient && colouring.mode == 0));
+    shader->setUniformValue("interiorPalette", colouring.interiorPalette);
+    shader->setUniformValue("trapViewScaled", int(colouring.trapViewScaled));
     shader->setUniformValue("trapShape", colouring.trap);
     shader->setUniformValue("escapeColour", QVector3D(colouring.escapeColour.redF(), colouring.escapeColour.greenF(), colouring.escapeColour.blueF()));
     shader->setUniformValue("interiorColour", QVector3D(colouring.interiorColour.redF(), colouring.interiorColour.greenF(), colouring.interiorColour.blueF()));
@@ -323,25 +345,30 @@ void View::paintGL() {
         glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         uploadedGradient = settings.gradient;
+        ++gradientUploadCount;
     }
     shader->setUniformValue("gradientTexture", 0);
-    GLuint interiorTexture = 0;
-    glGenTextures(1, &interiorTexture);
+    if (!interiorTexture)
+        glGenTextures(1, &interiorTexture);
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_1D, interiorTexture);
-    QVector<float> interiorPixels;
     const auto stops = colouring.interiorStops.isEmpty() ? settings.gradient : colouring.interiorStops;
-    for (int i = 0; i < 1024; ++i) {
-        QColor colour = gradientColour(stops, double(i) / 1023);
-        interiorPixels << colour.redF() << colour.greenF() << colour.blueF();
+    if (uploadedInterior != stops) {
+        QVector<float> interiorPixels;
+        interiorPixels.reserve(1024 * 3);
+        for (int i = 0; i < 1024; ++i) {
+            QColor colour = gradientColour(stops, double(i) / 1023);
+            interiorPixels << colour.redF() << colour.greenF() << colour.blueF();
+        }
+        glTexImage1D(GL_TEXTURE_1D, 0, GL_RGB16F, 1024, 0, GL_RGB, GL_FLOAT, interiorPixels.constData());
+        glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        uploadedInterior = stops;
+        ++interiorUploadCount;
     }
-    glTexImage1D(GL_TEXTURE_1D, 0, GL_RGB16F, 1024, 0, GL_RGB, GL_FLOAT, interiorPixels.constData());
-    glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     shader->setUniformValue("interiorTexture", 1);
     glDrawArrays(GL_TRIANGLES, 0, 3);
-    glDeleteTextures(1, &interiorTexture);
     glActiveTexture(GL_TEXTURE0);
     shader->release();
     if (exportSize.isEmpty() && settings.orbit) {
@@ -420,6 +447,7 @@ View::~View() {
         if (ready) {
             glDeleteVertexArrays(1, &vao);
             glDeleteTextures(1, &gradientTexture);
+            glDeleteTextures(1, &interiorTexture);
         }
         doneCurrent();
     }

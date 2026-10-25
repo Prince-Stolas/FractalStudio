@@ -46,6 +46,8 @@ class Playground : public QMainWindow {
     QDockWidget *dock;
     QComboBox *target, *palette;
     void presetGallery();
+    QWidget *colourPanel = nullptr;
+    void refreshColourPanel();
     void initializeWorkspace();
     QLineEdit *equation;
     QLabel *error, *coordinates;
