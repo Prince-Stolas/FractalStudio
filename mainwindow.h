@@ -96,4 +96,5 @@ class Playground : public QMainWindow {
   public:
     Playground();
     bool smoke();
+    bool captureReadme(const QString &directory);
 };

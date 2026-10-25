@@ -1,12 +1,14 @@
 <div align="center">
 
+<img src="icons/app.svg" width="112" height="112" alt="Fractal Studio icon">
+
 # Fractal Studio
 
 **Write an equation. Explore its world.**
 
 A native desktop playground for complex dynamics, custom fractals, and orbit-trap art.
 
-**C++17 · Qt 6 Widgets · OpenGL 4.0 · Local-first**
+<img src="docs/media/chips.svg" width="650" alt="C++17 · Qt 6 Widgets · OpenGL 4.0 · Local-first · Native UI · CMake">
 
 [Features](#features) · [Build and run](#build-and-run) · [Equations](#equations) · [Controls](#controls) · [Architecture](#architecture) · [Testing](#testing)
 
@@ -19,6 +21,16 @@ A native desktop playground for complex dynamics, custom fractals, and orbit-tra
 Fractal Studio turns editable complex recurrences into interactive GPU-rendered landscapes. Mandelbrot and Julia are starting points, not fixed rendering modes: change the equation, add named complex variables, split the workspace, and compare the results.
 
 The interface is a compact native Qt workspace with an active-view inspector, floatable variable editor, and independent settings for each numbered view. No browser wrapper, account, or server is required.
+
+## See it in action
+
+![Fractal Studio running the Mandelbrot equation with its native inspector](docs/media/workspace.webp)
+
+| Editable Julia equations | Orbit-trap colouring |
+| --- | --- |
+| ![Real Julia view with a complex parameter and Ocean palette](docs/media/julia.webp) | ![Circle orbit trap with the Appearance controls visible](docs/media/orbit-trap.webp) |
+
+These are captures from the running Qt/OpenGL app, not UI mockups. They were captured at 2× display scale, given transparent outer margins and rounded corners, then resized and encoded as WebP with lossless alpha. The app content itself remains unchanged and opaque. The hero is 1920 pixels wide; gallery images are 1440 pixels wide.
 
 ## Features
 

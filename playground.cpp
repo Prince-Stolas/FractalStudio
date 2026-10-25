@@ -18,6 +18,7 @@ int main(int argc, char **argv) {
     format.setSamples(0);
     QSurfaceFormat::setDefaultFormat(format);
     QApplication app(argc, argv);
+    app.setWindowIcon(QIcon(":/ui/icons/app.svg"));
     if (app.arguments().contains("--smoke-test"))
         qInstallMessageHandler([](QtMsgType, const QMessageLogContext &, const QString &message) {
             fprintf(stderr, "%s\n", message.toUtf8().constData());
@@ -32,6 +33,14 @@ int main(int argc, char **argv) {
         QTimer::singleShot(1200, &app, [&app, &window, path] {
             app.exit(window.grab().save(path, "PNG") ? 0 : 3);
         });
+    }
+    const int readmeIndex = app.arguments().indexOf("--capture-readme");
+    if (readmeIndex >= 0 && readmeIndex + 1 < app.arguments().size()) {
+        const QString directory = app.arguments().at(readmeIndex + 1);
+        QTimer::singleShot(1200, &app, [&, directory] {
+            app.exit(window.captureReadme(directory) ? 0 : 3);
+        });
+        return app.exec();
     }
     if (app.arguments().contains("--smoke-test"))
         QTimer::singleShot(700, &app, [&] { app.exit(window.smoke() ? 0 : 2); });

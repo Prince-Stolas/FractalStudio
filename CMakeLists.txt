@@ -14,6 +14,7 @@ qt_add_executable(fractal WIN32
     mainwindow_ui.cpp
     mainwindow_tools.cpp
     regression.cpp
+    readme_capture.cpp
 )
 qt_add_resources(ui_icon_sources ui_resources.qrc)
 target_sources(fractal PRIVATE ${ui_icon_sources})
