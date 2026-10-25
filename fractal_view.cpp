@@ -104,6 +104,8 @@ uniform double scale,bailout;
 uniform vec2 resolution,marker;
 uniform int iterations,aSource,bSource,cSource,palette,showMarker,quadratic;
 uniform float frequency,phase,smoothing;
+uniform int calibrationPass;
+uniform vec2 convergenceRange;
 uniform sampler1D gradientTexture;
 uniform int colourMode, escapeSolid, interiorGradient, convergenceEnabled, trapShape, interiorPalette, trapViewScaled;
 uniform vec3 escapeColour, interiorColour;
@@ -142,7 +144,7 @@ void main(){
  bool converged = false;
  float convergenceCount = 0.0;
  double previousResidual = 0.0;
- double convergenceTolerance = tolerance * (trapViewScaled!=0 ? max(abs(scale),1e-15) : 1.0);
+ double convergenceTolerance = tolerance;
  double trapMinimum = 1e30;
  double residual = 1.0;
  if(!inside) for(int j=0;j<10000;j++) {
@@ -186,6 +188,8 @@ void main(){
      escaped=isnan(radius)||isinf(radius)||radius>bailout*bailout;
      if(escaped) break;
  }
+ // The calibration pass executes the identical orbit and fractional crossing metric.
+ if(calibrationPass!=0){frag=vec4(convergenceCount,(!escaped&&converged&&!invalidHistory)?1.0:0.0,0,1);return;}
  vec3 rgb=interiorColour;
  if(escaped){float t=float(count);if(radius>1.0&&!isinf(radius))t+=smoothing*(1.0-log(max(log(float(radius))*.5,.0001))/log(2.0));
  float mappingScale=trapViewScaled!=0 ? float(3.0/max(abs(scale),1e-15)) : 1.0;
@@ -199,9 +203,10 @@ void main(){
  }
  if(escaped && escapeSolid!=0) rgb=escapeColour;
  if(!escaped && interiorGradient!=0) {
-     // Residual extrapolation is a progress metric, not a claim of convergence.
-     float progress=converged ? float(convergenceCount) : float(iterations)+log(1.0+float(max(residual/convergenceTolerance-1.0,0.0)));
-     float v=clamp(0.8*log(1.0+progress)/log(1.0+float(iterations))+phase,0.0,0.98);
+     // Bounded nonconverging (including periodic) orbits occupy the slow endpoint.
+     float extent=convergenceRange.y-convergenceRange.x;
+     float progress=converged ? (extent>0.0 ? clamp((convergenceCount-convergenceRange.x)/extent,0.0,1.0) : 0.0) : 1.0;
+     float v=clamp(progress+phase,0.0,1.0);
      if(interiorPalette>=4) rgb=texture(interiorTexture,v).rgb;
      else if(interiorPalette==0) rgb=.5+.5*cos(6.2831853*(v+vec3(.02,.19,.36)));
      else if(interiorPalette==1) rgb=.5+.5*cos(6.2831853*(v+vec3(.0,.08,.20)));
@@ -281,6 +286,64 @@ void View::initializeGL() {
     glGenVertexArrays(1, &vao);
     glBindVertexArray(vao);
     rebuild();
+}
+
+void View::calibrateConvergence(float width, float height) {
+    if (!settings.colouring.interiorGradient || settings.colouring.mode != 0)
+        return;
+    const bool visible = settings.colouring.trapViewScaled;
+    const auto &colour = settings.colouring;
+    const double aspect = visible ? double(width / height) : colour.customReference ? colour.referenceAspect : 1.5;
+    const double referenceX = visible ? double(cx) : colour.customReference ? colour.referenceReal : (settings.variables[2].source == Pixel ? -.5 : 0.0);
+    const double referenceY = visible ? double(cy) : colour.customReference ? colour.referenceImag : 0.0;
+    const double referenceSpan = visible ? double(span) : colour.customReference ? colour.referenceSpan : 3.0;
+    QByteArray key;
+    QDataStream stream(&key, QIODevice::WriteOnly);
+    stream << compiledFragment << settings.iterations << settings.historySize
+           << settings.bailout << settings.smoothing << settings.colouring.tolerance
+           << visible << referenceX << referenceY << referenceSpan << aspect;
+    for (const auto &variable : settings.variables)
+        stream << variable.source << variable.real << variable.imag;
+    stream << settings.negativeHistory;
+    if (key == convergenceCalibrationKey)
+        return;
+
+    // A small floating-point GPU pass avoids reparsing equations on the CPU and
+    // shares every orbit operation, history rule and source binding with rendering.
+    const int sampleHeight = 32;
+    const int sampleWidth = qBound(16, qRound(sampleHeight * aspect), 128);
+    QOpenGLFramebufferObjectFormat format;
+    format.setInternalTextureFormat(GL_RGBA32F);
+    GLint previousFramebuffer = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previousFramebuffer);
+    QOpenGLFramebufferObject target(sampleWidth, sampleHeight, format);
+    if (!target.isValid())
+        return;
+    target.bind();
+    shader->setUniformValue("calibrationPass", 1);
+    shader->setUniformValue("resolution", QVector2D(sampleWidth, sampleHeight));
+    uniform2("center", referenceX, referenceY);
+    uniform("scale", referenceSpan);
+    glViewport(0, 0, sampleWidth, sampleHeight);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    QVector<float> samples(sampleWidth * sampleHeight * 4);
+    glReadPixels(0, 0, sampleWidth, sampleHeight, GL_RGBA, GL_FLOAT, samples.data());
+    float minimum = std::numeric_limits<float>::infinity(), maximum = -minimum;
+    for (int i = 0; i < samples.size(); i += 4) {
+        if (samples[i + 1] > .5f && std::isfinite(samples[i])) {
+            minimum = std::min(minimum, samples[i]);
+            maximum = std::max(maximum, samples[i]);
+        }
+    }
+    convergenceRange = std::isfinite(minimum) ? QVector2D(minimum, maximum) : QVector2D(0, 0);
+    convergenceCalibrationKey = key;
+    ++convergenceCalibrationCount;
+    glBindFramebuffer(GL_FRAMEBUFFER, GLuint(previousFramebuffer));
+    glViewport(0, 0, int(width), int(height));
+    shader->setUniformValue("calibrationPass", 0);
+    shader->setUniformValue("resolution", QVector2D(width, height));
+    uniform2("center", double(cx), double(cy));
+    uniform("scale", double(span));
 }
 
 void View::paintGL() {
@@ -378,6 +441,11 @@ void View::paintGL() {
         ++interiorUploadCount;
     }
     shader->setUniformValue("interiorTexture", 1);
+    calibrateConvergence(w, h);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_1D, interiorTexture);
+    shader->setUniformValue("convergenceRange", convergenceRange);
+    shader->setUniformValue("calibrationPass", 0);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     glActiveTexture(GL_TEXTURE0);
     shader->release();

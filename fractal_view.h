@@ -16,12 +16,17 @@ class View : public QOpenGLWidget, protected QOpenGLFunctions_4_0_Core {
     std::function<void()> activated;
     QString lastError;
     quint64 shaderBuildCount = 0, gradientUploadCount = 0, interiorUploadCount = 0;
+    quint64 convergenceCalibrationCount = 0;
+    QVector2D calibratedConvergenceRange() const { return convergenceRange; }
 
   private:
     QOpenGLShaderProgram *shader = nullptr;
     GLuint gradientTexture = 0, interiorTexture = 0;
     QJsonArray uploadedGradient, uploadedInterior;
     QString compiledFragment;
+    QByteArray convergenceCalibrationKey;
+    QVector2D convergenceRange = QVector2D(0, 1);
+    void calibrateConvergence(float width, float height);
     GLuint vao = 0;
     QPoint last;
     bool dragging = false, picking = false, hasPoint = false;

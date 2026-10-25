@@ -430,7 +430,10 @@ bool Playground::smoke() {
     colourSettings.equation = "z[n]*0.7+0.1";
     ok = colourView->apply() && ok;
     int slow = colourView->renderImage({16, 16}).pixelColor(8, 8).red();
-    ok = ok && slow > fast + 20;
+    // Uniform equations have a degenerate sampled range: their sole speed is fastest.
+    ok = ok && slow == 0 && fast == 0;
+    colourSettings.equation = "z[n]*(0.4+0.1*real(pixel))+0.1";
+    ok = colourView->apply() && ok;
     colourSettings.smoothing = 0;
     ok = colourView->apply() && ok;
     QImage discreteConvergence = colourView->renderImage({64, 64});
@@ -445,7 +448,7 @@ bool Playground::smoke() {
     colourSettings.equation = "1-z[n]+pixel*0.01";
     ok = colourView->apply() && ok;
     QImage periodicProgress = colourView->renderImage({64, 64});
-    ok = ok && periodicProgress.pixelColor(32, 32).red() > slow;
+    ok = ok && periodicProgress.pixelColor(32, 32) == QColor(Qt::white);
     colourSettings.equation = "z[n]*0.99+pixel*0.001";
     ok = colourView->apply() && ok;
     QImage budgetProgress = colourView->renderImage({64, 64});
@@ -457,7 +460,8 @@ bool Playground::smoke() {
             progressMinimum = qMin(progressMinimum, value);
             progressMaximum = qMax(progressMaximum, value);
         }
-    ok = ok && progressMaximum > progressMinimum;
+    // Unresolved bounded orbits no longer invent a residual-based speed range.
+    ok = ok && progressMaximum == 255;
     colourSettings.colouring.interiorPalette = 0;
     QImage spectrumInterior = colourView->renderImage({64, 64});
     colourSettings.colouring.interiorPalette = 2;
@@ -468,13 +472,43 @@ bool Playground::smoke() {
     const auto builds = colourView->shaderBuildCount;
     const auto exteriorUploads = colourView->gradientUploadCount;
     const auto interiorUploads = colourView->interiorUploadCount;
+    const auto calibrations = colourView->convergenceCalibrationCount;
     colourSettings.phase += 0.01;
     ok = colourView->apply() && ok;
     colourView->renderImage({64, 64});
     colourView->renderImage({64, 64});
     ok = ok && builds == colourView->shaderBuildCount &&
-         exteriorUploads == colourView->gradientUploadCount && interiorUploads == colourView->interiorUploadCount;
+         exteriorUploads == colourView->gradientUploadCount && interiorUploads == colourView->interiorUploadCount &&
+         calibrations == colourView->convergenceCalibrationCount;
+    colourSettings.phase = 0;
+    colourSettings.colouring.interiorPalette = 4;
     colourSettings.colouring.trapViewScaled = false;
+    colourSettings.equation = "z[n]*(0.4+0.1*real(pixel))+0.1";
+    colourView->reset();
+    ok = colourView->apply() && ok;
+    QImage sampled = colourView->renderImage({96, 64});
+    auto range = colourView->calibratedConvergenceRange();
+    auto count = colourView->convergenceCalibrationCount;
+    ok = ok && range.y() > range.x();
+    ok = ok && sampled.pixelColor(0, 32).red() == 0 && sampled.pixelColor(95, 32).red() == 255;
+    for (int x = 1; x < 96; ++x)
+        ok = ok && sampled.pixelColor(x, 32).red() >= sampled.pixelColor(x - 1, 32).red();
+    colourView->cx += .2;
+    colourView->span = .5;
+    colourView->renderImage({96, 64});
+    ok = ok && colourView->convergenceCalibrationCount == count && colourView->calibratedConvergenceRange() == range;
+    colourSettings.colouring.trapViewScaled = true;
+    colourView->renderImage({96, 64});
+    ok = ok && colourView->convergenceCalibrationCount == count + 1 && colourView->calibratedConvergenceRange() != range;
+    colourSettings.colouring.trapViewScaled = false;
+    colourSettings.colouring.customReference = true;
+    colourSettings.colouring.referenceReal = 0.25;
+    colourSettings.colouring.referenceSpan = 0.6;
+    auto beforeCustom = colourView->convergenceCalibrationCount;
+    colourView->renderImage({96, 64});
+    ok = ok && colourView->convergenceCalibrationCount == beforeCustom + 1;
+    colourView->renderImage({96, 64});
+    ok = ok && colourView->convergenceCalibrationCount == beforeCustom + 1;
     auto colourRoundtrip = readSettings(settingsJson(colourSettings));
     ok = ok && settingsJson(colourRoundtrip) == settingsJson(colourSettings);
     auto invalidColour = settingsJson(colourSettings);

@@ -94,6 +94,9 @@ QJsonObject Playground::settingsJson(const Settings &s) const {
                           {"escapeColour", c.escapeColour.name()}, {"interiorColour", c.interiorColour.name()},
                           {"interiorGradientName", c.interiorGradientName}, {"interiorStops", c.interiorStops},
                           {"interiorPalette", c.interiorPalette}, {"trapViewScaled", c.trapViewScaled},
+                          {"customReference", c.customReference},
+                          {"referenceReal", c.referenceReal}, {"referenceImag", c.referenceImag},
+                          {"referenceSpan", c.referenceSpan}, {"referenceAspect", c.referenceAspect},
                           {"tolerance", c.tolerance}, {"trap", c.trap}, {"trapReal", c.trapReal},
                           {"trapImag", c.trapImag}, {"trapRadius", c.trapRadius}};
     return {{"colouring", colouring}, {"negativeHistory", negative},
@@ -133,6 +136,13 @@ Settings Playground::readSettings(QJsonObject o) const {
         };
         c.interiorPalette = object.contains("interiorPalette") ? int(numeric("interiorPalette", 0, 4)) : 4;
         c.trapViewScaled = object["trapViewScaled"].toBool(false);
+        c.customReference = object["customReference"].toBool(false);
+        if (object.contains("referenceSpan")) {
+            c.referenceReal = numeric("referenceReal", -1e15, 1e15);
+            c.referenceImag = numeric("referenceImag", -1e15, 1e15);
+            c.referenceSpan = numeric("referenceSpan", 1e-15, 1e15);
+            c.referenceAspect = numeric("referenceAspect", 0.1, 10);
+        }
         c.mode = int(numeric("mode", 0, 1));
         c.trap = int(numeric("trap", 0, 2));
         c.tolerance = numeric("tolerance", 1e-12, 1);

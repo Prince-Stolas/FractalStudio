@@ -107,8 +107,62 @@ void Playground::refreshColourPanel() {
     auto *mapping = new QComboBox;
     mapping->addItems({"Absolute", "View-scaled"});
     mapping->setCurrentIndex(c.trapViewScaled);
-    mapping->setToolTip("Absolute uses world units. View-scaled adjusts escape bands and convergence tolerance to the visible span, and scales orbit-trap distances.");
-    form->addRow("Colour mapping", mapping);
+    mapping->setToolTip("Absolute calibrates convergence in a fixed reference region. View-scaled calibrates the visible region, adjusts escape bands, and scales orbit-trap distances.");
+    auto *mappingRow = new QWidget;
+    auto *mappingLayout = new QHBoxLayout(mappingRow);
+    mappingLayout->setContentsMargins(0, 0, 0, 0);
+    mappingLayout->addWidget(mapping, 1);
+    auto *calibration = new QToolButton;
+    calibration->setText("…");
+    calibration->setToolTip("Advanced convergence calibration region");
+    mappingLayout->addWidget(calibration);
+    form->addRow("Colour mapping", mappingRow);
+    connect(calibration, &QToolButton::clicked, colourPanel, [this, commit] {
+        QDialog dialog(this);
+        dialog.setWindowTitle("Convergence calibration region");
+        QFormLayout layout(&dialog);
+        auto value = active()->settings.colouring;
+        QCheckBox custom("Use custom reference region for Absolute mapping");
+        custom.setChecked(value.customReference);
+        layout.addRow(&custom);
+        QDoubleSpinBox real, imag, span, aspect;
+        for (auto *input : {&real, &imag, &span, &aspect}) {
+            input->setDecimals(12);
+            input->setRange(-1e15, 1e15);
+        }
+        span.setMinimum(1e-15);
+        aspect.setRange(0.1, 10);
+        real.setValue(value.referenceReal);
+        imag.setValue(value.referenceImag);
+        span.setValue(value.referenceSpan);
+        aspect.setValue(value.referenceAspect);
+        layout.addRow("Centre real", &real);
+        layout.addRow("Centre imaginary", &imag);
+        layout.addRow("Vertical span", &span);
+        layout.addRow("Width / height", &aspect);
+        QPushButton current("Use current view");
+        layout.addRow(&current);
+        connect(&current, &QPushButton::clicked, &dialog, [&] {
+            custom.setChecked(true);
+            real.setValue(double(active()->cx));
+            imag.setValue(double(active()->cy));
+            span.setValue(double(active()->span));
+            aspect.setValue(double(active()->width()) / qMax(1, active()->height()));
+        });
+        QDialogButtonBox buttons(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+        layout.addRow(&buttons);
+        connect(&buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+        connect(&buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        if (dialog.exec() != QDialog::Accepted)
+            return;
+        auto &colour = active()->settings.colouring;
+        colour.customReference = custom.isChecked();
+        colour.referenceReal = real.value();
+        colour.referenceImag = imag.value();
+        colour.referenceSpan = span.value();
+        colour.referenceAspect = aspect.value();
+        commit();
+    });
     connect(mapping, &QComboBox::currentIndexChanged, colourPanel, [this, commit](int index) {
         active()->settings.colouring.trapViewScaled = index == 1;
         commit();

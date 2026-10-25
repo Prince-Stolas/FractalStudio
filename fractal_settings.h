@@ -16,6 +16,8 @@ struct Colouring {
     double tolerance = 1e-6;
     int interiorPalette = 4; // Legacy workspaces used only custom interior gradients.
     bool trapViewScaled = false;
+    bool customReference = false;
+    double referenceReal = -0.5, referenceImag = 0, referenceSpan = 3, referenceAspect = 1.5;
     int trap = 0; // Point, circle, cross.
     double trapReal = 0, trapImag = 0, trapRadius = 1;
 };
