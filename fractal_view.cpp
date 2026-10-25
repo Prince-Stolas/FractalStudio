@@ -183,12 +183,13 @@ void main(){
  }
  if(escaped && escapeSolid!=0) rgb=escapeColour;
  if(!escaped && converged && interiorGradient!=0) {
-     float v=float(convergenceCount)*frequency+phase;
-     rgb=texture(interiorTexture,1.0-abs(2.0*fract(v*.5)-1.0)).rgb;
+     float v=log(1.0+float(convergenceCount))/log(1.0+float(iterations));
+     rgb=texture(interiorTexture,clamp(v+phase,0.0,1.0)).rgb;
  }
  if(colourMode==1) {
-     float v=float(trapMinimum)*frequency+phase;
-     v=1.0-exp(-max(v,0.0));
+     double reference=max(abs(scale)*0.1,1e-15);
+     float proximity=log(1.0+float(reference/max(trapMinimum,reference*1e-12)));
+     float v=clamp(1.0-exp(-proximity*max(frequency/0.025,0.001))+phase,0.0,1.0);
      if(palette>=4) rgb=gradient(v);
      else if(palette==0) rgb=.5+.5*cos(6.2831853*(v+vec3(.02,.19,.36)));
      else if(palette==1) rgb=.5+.5*cos(6.2831853*(v+vec3(.0,.08,.20)));

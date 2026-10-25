@@ -741,7 +741,13 @@ void Playground::initializeWorkspace() {
         dialog.setWindowTitle("Colour classification");
         auto *layout = new QFormLayout(&dialog);
         auto value = active()->settings.colouring;
-        QComboBox mode, escape, interior, trap, interiorPalette;
+        QComboBox mode, escape, interior, trap, interiorPalette, exteriorPalette;
+        exteriorPalette.addItems({"Spectrum", "Ember", "Ocean", "Monochrome"});
+        for (auto entry : gradientLibrary)
+            exteriorPalette.addItem(entry.toObject()["name"].toString());
+        exteriorPalette.setCurrentIndex(active()->settings.palette >= 4
+            ? qMax(4, exteriorPalette.findText(active()->settings.gradientName))
+            : active()->settings.palette);
         mode.addItems({"Escape / fixed-point speed", "Orbit trap"});
         escape.addItems({"Gradient", "Solid colour"});
         interior.addItems({"Solid fallback", "Convergence-speed gradient"});
@@ -783,6 +789,7 @@ void Playground::initializeWorkspace() {
         layout->addRow("Colouring mode", &mode);
         layout->addRow("Escaping points", &escape);
         layout->addRow("Escape colour", &escapeColour);
+        layout->addRow("Exterior / trap gradient", &exteriorPalette);
         layout->addRow("Bounded / interior", &interior);
         layout->addRow("Fallback colour", &interiorColour);
         layout->addRow(&convergence);
@@ -796,6 +803,7 @@ void Playground::initializeWorkspace() {
             bool traps = mode.currentIndex() == 1;
             layout->setRowVisible(&escape, !traps);
             layout->setRowVisible(&escapeColour, !traps && escape.currentIndex() == 1);
+            layout->setRowVisible(&exteriorPalette, traps || escape.currentIndex() == 0);
             layout->setRowVisible(&interior, !traps);
             layout->setRowVisible(&interiorColour, !traps);
             layout->setRowVisible(&convergence, !traps);
@@ -831,8 +839,16 @@ void Playground::initializeWorkspace() {
         value.interiorGradientName = interiorPalette.currentText();
         if (interiorPalette.currentIndex() >= 0)
             value.interiorStops = gradientLibrary[interiorPalette.currentIndex()].toObject()["stops"].toArray();
-        active()->settings.colouring = value;
+        auto &settings = active()->settings;
+        settings.colouring = value;
+        settings.palette = exteriorPalette.currentIndex() >= 4 ? 5 : exteriorPalette.currentIndex();
+        if (exteriorPalette.currentIndex() >= 4) {
+            auto entry = gradientLibrary[exteriorPalette.currentIndex() - 4].toObject();
+            settings.gradientName = entry["name"].toString();
+            settings.gradient = entry["stops"].toArray();
+        }
         active()->apply();
+        load();
     });
     connect(gradients, &QPushButton::clicked, this, [this] { gradientDialog(); });
     palette = new QComboBox;

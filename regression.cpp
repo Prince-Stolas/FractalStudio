@@ -404,6 +404,33 @@ bool Playground::smoke() {
         ok = colourView->apply() && ok;
         ok = ok && colourView->renderImage({16, 16}).pixelColor(8, 8) == QColor("#0000ff");
     }
+    QJsonArray contrastStops{
+        QJsonObject{{"position", 0}, {"colour", "#000000"}},
+        QJsonObject{{"position", 1}, {"colour", "#ffffff"}}};
+    colourSettings.gradient = contrastStops;
+    colourSettings.colouring.trap = 0;
+    colourSettings.equation = "pixel";
+    ok = colourView->apply() && ok;
+    QImage trapContrast = colourView->renderImage({64, 64});
+    int darkest = 255, brightest = 0;
+    for (int y = 0; y < 64; ++y)
+        for (int x = 0; x < 64; ++x) {
+            int light = trapContrast.pixelColor(x, y).red();
+            darkest = qMin(darkest, light);
+            brightest = qMax(brightest, light);
+        }
+    ok = ok && brightest - darkest > 100;
+    colourSettings.colouring.mode = 0;
+    colourSettings.iterations = 128;
+    colourSettings.colouring.tolerance = 1e-6;
+    colourSettings.colouring.interiorStops = contrastStops;
+    colourSettings.equation = "z[n]*0.1+0.1";
+    ok = colourView->apply() && ok;
+    int fast = colourView->renderImage({16, 16}).pixelColor(8, 8).red();
+    colourSettings.equation = "z[n]*0.7+0.1";
+    ok = colourView->apply() && ok;
+    int slow = colourView->renderImage({16, 16}).pixelColor(8, 8).red();
+    ok = ok && slow > fast + 20;
     auto colourRoundtrip = readSettings(settingsJson(colourSettings));
     ok = ok && settingsJson(colourRoundtrip) == settingsJson(colourSettings);
     auto invalidColour = settingsJson(colourSettings);

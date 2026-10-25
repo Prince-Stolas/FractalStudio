@@ -13,7 +13,7 @@ struct Colouring {
     QColor escapeColour = Qt::white, interiorColour = Qt::black;
     QString interiorGradientName = "Default";
     QJsonArray interiorStops;
-    double tolerance = 1e-8;
+    double tolerance = 1e-6;
     int trap = 0; // Point, circle, cross.
     double trapReal = 0, trapImag = 0, trapRadius = 1;
 };
