@@ -68,8 +68,8 @@ struct Variable {
 };
 struct Settings {
     QString equation="z[n]^p+c";
-    QStringList names={"a","b","c",""};
-    int iterations=400, palette=0;
+    QStringList names={"","","c",""};
+    int iterations=128, palette=0;
     double p=2,bailout=16,frequency=.025,phase=0,smoothing=1;
     QJsonArray gradient={QJsonObject{{"position",0.0},{"colour","#ffffff"}},QJsonObject{{"position",.25},{"colour","#5599ff"}},QJsonObject{{"position",.65},{"colour","#e060bb"}},QJsonObject{{"position",1.0},{"colour","#000000"}}};
     QMap<int,QPointF> negativeHistory;
@@ -358,11 +358,13 @@ class Playground:public QMainWindow {
         if(fullscreenMode)leaveFullscreen();
         wasMaximized=isMaximized();dockWasVisible=dock->isVisible();
         if(single){QWidget *node=active();while(node!=centralWidget()){QWidget *parent=node->parentWidget();if(auto *s=qobject_cast<QSplitter*>(parent)){for(int i=0;i<s->count();++i){QWidget *other=s->widget(i);if(other!=node&&!other->isHidden()){fullscreenHidden<<other;other->hide();}}}node=parent;}}
+        if(variableDock&&variableDock->isVisible()){fullscreenHidden<<variableDock;variableDock->hide();}
         toolbar->hide();dock->hide();statusBar()->hide();fullscreenMode=true;showFullScreen();active()->setFocus();
     }
     struct VariableControls {QComboBox *source,*modifier;QWidget *values,*picking;QDoubleSpinBox *real,*imag;QLineEdit *expression;};
-    QVector<VariableControls> controls;QFormLayout *variableForm=nullptr;
-    void rebuildVariables(){while(variableForm->rowCount())variableForm->removeRow(0);controls.resize(active()->settings.variables.size());for(int i=0;i<controls.size();++i)addVariable(variableForm,i);}
+    QVector<VariableControls> controls;QFormLayout *variableForm=nullptr;QDockWidget *variableDock=nullptr;
+    QStringList controlNames;
+    void rebuildVariables(){while(variableForm->rowCount())variableForm->removeRow(0);controls.clear();controls.resize(active()->settings.variables.size());controlNames=active()->settings.names;for(int i=0;i<controls.size();++i)if(i==3||!active()->settings.names[i].isEmpty())addVariable(variableForm,i);}
     void manageVariables(){QDialog dialog(this);dialog.setWindowTitle("Named complex variables");QVBoxLayout layout(&dialog);QListWidget list;layout.addWidget(&list);auto refresh=[&]{list.clear();for(auto name:active()->settings.names)if(!name.isEmpty())list.addItem(name);};refresh();QLineEdit name;name.setPlaceholderText("Variable name");layout.addWidget(&name);QPushButton add("Add"),remove("Delete selected");layout.addWidget(&add);layout.addWidget(&remove);QLabel message;layout.addWidget(&message);connect(&add,&QPushButton::clicked,&dialog,[&]{auto &s=active()->settings;QString id=name.text().trimmed();if(!Equation::validName(id)||s.names.contains(id)){message.setText("Choose a unique identifier; built-in names are reserved.");return;}s.names.append(id);s.variables.append(Variable{});rebuildVariables();load();apply();refresh();});connect(&remove,&QPushButton::clicked,&dialog,[&]{auto *item=list.currentItem();if(!item)return;auto &s=active()->settings;int i=s.names.indexOf(item->text());if(i<0)return;if(i<3){message.setText("Preset parameters a, b and c currently cannot be deleted.");return;}s.names.removeAt(i);s.variables.removeAt(i);routes.erase(std::remove_if(routes.begin(),routes.end(),[&](PickRoute r){return r.target==active()->property("number").toInt()&&r.variable==i;}),routes.end());for(auto &r:routes)if(r.target==active()->property("number").toInt()&&r.variable>i)--r.variable;rebuildVariables();load();apply();refresh();});dialog.exec();}
     void visibility(int i){auto &u=controls[i];int mode=u.source->currentIndex();u.values->setVisible(mode==Constant||mode==Mouse);u.picking->setVisible(mode==Mouse);u.expression->setVisible(mode==Expression);}
     void addVariable(QFormLayout *form,int i){
@@ -378,14 +380,15 @@ class Playground:public QMainWindow {
     View *active()const{return views.value(qMax(0,target->currentIndex()),views.first());}
     QDoubleSpinBox *number(double min,double max,int decimals=8){auto *v=new QDoubleSpinBox;v->setRange(min,max);v->setDecimals(decimals);v->setSingleStep(.005);v->setKeyboardTracking(false);return v;}
     void load(){loading=true;const auto &s=active()->settings;equation->setText(s.equation);exponent->setValue(s.p);bailout->setValue(s.bailout);iterations->setValue(s.iterations);palette->setCurrentIndex(s.palette==5?qMax(5,palette->findText(s.gradientName)):s.palette);frequency->setValue(s.frequency);phase->setValue(s.phase);smoothing->setValue(s.smoothing);
-        if(controls.size()!=s.variables.size())rebuildVariables();
-        for(int i=0;i<s.variables.size();++i){const auto &v=s.variables[i];auto &u=controls[i];u.source->setCurrentIndex(v.source);u.real->setValue(v.real);u.imag->setValue(v.imag);u.expression->setText(v.equation);u.modifier->setCurrentIndex(u.modifier->findData(v.modifiers));visibility(i);}loading=false;
+        if(controlNames!=s.names)rebuildVariables();
+        if(variableDock)variableDock->setWindowTitle("Variables — "+viewName(active()));
+        for(int i=0;i<s.variables.size();++i){if(i!=3&&s.names[i].isEmpty())continue;const auto &v=s.variables[i];auto &u=controls[i];u.source->setCurrentIndex(v.source);u.real->setValue(v.real);u.imag->setValue(v.imag);u.expression->setText(v.equation);u.modifier->setCurrentIndex(u.modifier->findData(v.modifiers));visibility(i);}loading=false;
     }
     void apply(){if(loading)return;auto &s=active()->settings;s.equation=equation->text();s.p=exponent->value();s.bailout=bailout->value();s.iterations=iterations->value();s.palette=qMin(5,palette->currentIndex());if(palette->currentIndex()>=5&&palette->currentIndex()-5<gradientLibrary.size()){auto entry=gradientLibrary[palette->currentIndex()-5].toObject();s.gradientName=entry["name"].toString();s.gradient=entry["stops"].toArray();}s.frequency=frequency->value();s.phase=phase->value();s.smoothing=smoothing->value();
-        for(int i=0;i<s.variables.size();++i){auto &v=s.variables[i];auto &u=controls[i];v.source=u.source->currentIndex();v.real=u.real->value();v.imag=u.imag->value();v.equation=u.expression->text();v.modifiers=u.modifier->currentData().toInt();}
+        for(int i=0;i<s.variables.size();++i){if(i!=3&&s.names[i].isEmpty())continue;auto &v=s.variables[i];auto &u=controls[i];v.source=u.source->currentIndex();v.real=u.real->value();v.imag=u.imag->value();v.equation=u.expression->text();v.modifiers=u.modifier->currentData().toInt();}
         error->setText(active()->apply()?"":active()->lastError);
     }
-    void choosePreset(int index){if(loading)return;auto &s=active()->settings;Settings previous=s;s=Settings();s.palette=previous.palette;s.frequency=previous.frequency;s.phase=previous.phase;s.smoothing=previous.smoothing;s.gradient=previous.gradient;s.gradientName=previous.gradientName;switch(index){case 1:s.variables[3].source=Pixel;s.variables[2].source=Mouse;break;case 2:s.equation="abs(z[n])^p+c";break;case 3:s.equation="conj(z[n])^p+c";break;case 4:s.p=3;break;case 5:s.equation="sin(z[n])*a+c";s.variables[3].source=Pixel;s.variables[2].source=Mouse;break;}load();apply();active()->reset();}
+    void choosePreset(int index){if(loading)return;auto &s=active()->settings;Settings previous=s;s=Settings();s.palette=previous.palette;s.frequency=previous.frequency;s.phase=previous.phase;s.smoothing=previous.smoothing;s.gradient=previous.gradient;s.gradientName=previous.gradientName;switch(index){case 1:s.variables[3].source=Pixel;s.variables[2].source=Mouse;break;case 2:s.equation="abs(z[n])^p+c";break;case 3:s.equation="conj(z[n])^p+c";break;case 4:s.p=3;break;case 5:s.names[0]="a";s.equation="sin(z[n])*a+c";s.variables[3].source=Pixel;s.variables[2].source=Mouse;break;}load();apply();active()->reset();}
     bool makeJulia(View *source,View *destination){
         if(source==destination){error->setText("Choose different source and target views.");return false;}
         if(active()==source){apply();if(!error->text().isEmpty())return false;}
@@ -409,10 +412,9 @@ class Playground:public QMainWindow {
     }
     void pickInto(View *dest,double x,double y,Qt::KeyboardModifiers modifiers){
         int flags=int(modifiers&(Qt::ShiftModifier|Qt::ControlModifier|Qt::AltModifier));
-        int found=-1;
-        for(int i=0;i<dest->settings.variables.size();++i){const auto &v=dest->settings.variables[i];if(v.source==Mouse&&v.modifiers==flags){if(found>=0){coordinates->setText("Picking shortcut conflict: assign different modifiers to each mouse-picked variable.");return;}found=i;}}
-        if(found<0)return;
-        auto &v=dest->settings.variables[found];v.real=x;v.imag=y;
+        bool changed=false;
+        for(int i=0;i<dest->settings.variables.size();++i){auto &v=dest->settings.variables[i];if((i==3||!dest->settings.names[i].isEmpty())&&v.source==Mouse&&v.modifiers==flags){v.real=x;v.imag=y;changed=true;}}
+        if(!changed)return;
         if(!dest->apply())error->setText(dest->lastError);
         if(active()==dest)load();
     }
@@ -421,7 +423,7 @@ public:
         setWindowTitle("Fractal Playground");resize(1420,900);
         auto *container=new QWidget;auto *layout=new QVBoxLayout(container);layout->setContentsMargins(0,0,0,0);layout->setSpacing(0);
         container->setStyleSheet("QSplitter::handle { background: black; }");
-        root=new QSplitter;root->setHandleWidth(1);root->setChildrenCollapsible(false);left=new View;right=new View;right->settings.variables[2].source=Mouse;right->settings.variables[3].source=Pixel;right->cx=0;right->apply();root->addWidget(left);root->addWidget(right);views={left,right};for(auto *view:views)view->setProperty("number",nextNumber++);layout->addWidget(root);setCentralWidget(container);
+        root=new QSplitter;root->setHandleWidth(1);root->setChildrenCollapsible(false);left=new View;right=nullptr;root->addWidget(left);views={left};for(auto *view:views)view->setProperty("number",nextNumber++);layout->addWidget(root);setCentralWidget(container);
         dock=new QDockWidget("Playground settings",this);dock->setAllowedAreas(Qt::LeftDockWidgetArea|Qt::RightDockWidgetArea);dock->setMinimumWidth(320);auto *scroll=new QScrollArea;scroll->setWidgetResizable(true);auto *body=new QWidget;auto *form=new QFormLayout(body);form->setSpacing(10);scroll->setWidget(body);dock->setWidget(scroll);addDockWidget(Qt::RightDockWidgetArea,dock);
         toolbar=addToolBar("View");toolbar->setMovable(false);toolbar->addAction(dock->toggleViewAction());auto *reset=toolbar->addAction("Reset active view");connect(reset,&QAction::triggered,this,[this]{active()->reset();});
         auto *panesButton=new QToolButton;panesButton->setText("Layout / Fullscreen");panesButton->setPopupMode(QToolButton::InstantPopup);auto *menu=new QMenu(panesButton);panesButton->setMenu(menu);toolbar->addWidget(panesButton);
@@ -435,13 +437,14 @@ public:
         auto *all=new QShortcut(QKeySequence(Qt::CTRL|Qt::Key_F11),this);connect(all,&QShortcut::activated,this,[this]{if(fullscreenMode)leaveFullscreen();else enterFullscreen(false);});
         menu->addAction("Remove active view",this,[this]{removeView();});
         auto *shortcut=new QShortcut(QKeySequence(Qt::Key_Tab),this);connect(shortcut,&QShortcut::activated,this,[this]{dock->setVisible(!dock->isVisible());});
-        target=new QComboBox;target->addItems({"View 1","View 2"});form->addRow("Edit",target);connect(target,&QComboBox::currentIndexChanged,this,[this]{load();});
+        target=new QComboBox;target->addItem("View 1");form->addRow("Edit",target);connect(target,&QComboBox::currentIndexChanged,this,[this]{load();});
         toolbar->addAction("Copy / Julia…",this,[this]{viewOperations();});
         preset=new QComboBox;preset->addItems({"Mandelbrot","Julia","Burning ship","Tricorn","Cubic Multibrot","Sine Julia"});form->addRow("Load preset",preset);connect(preset,&QComboBox::activated,this,[this](int i){choosePreset(i);});
         equation=new QLineEdit;equation->setMaxLength(512);form->addRow("z next =",equation);
         auto *applyButton=new QPushButton("Compile equation");form->addRow(applyButton);connect(applyButton,&QPushButton::clicked,this,[this]{apply();});connect(equation,&QLineEdit::returnPressed,this,[this]{apply();});
         error=new QLabel;error->setWordWrap(true);error->setStyleSheet("color: #ff9191");form->addRow(error);
-        auto *variableBody=new QWidget;variableForm=new QFormLayout(variableBody);form->addRow(variableBody);rebuildVariables();auto *manage=new QPushButton("Add / delete named variables");form->addRow(manage);connect(manage,&QPushButton::clicked,this,[this]{manageVariables();});
+        variableDock=new QDockWidget("Variables",this);variableDock->setObjectName("variableEditor");variableDock->setAllowedAreas(Qt::AllDockWidgetAreas);variableDock->setFeatures(QDockWidget::DockWidgetClosable|QDockWidget::DockWidgetMovable|QDockWidget::DockWidgetFloatable);auto *variableScroll=new QScrollArea;variableScroll->setWidgetResizable(true);auto *variableBody=new QWidget;auto *variableLayout=new QVBoxLayout(variableBody);auto *fields=new QWidget;variableForm=new QFormLayout(fields);variableLayout->addWidget(fields);auto *manage=new QPushButton("Add / delete named variables");variableLayout->addWidget(manage);variableLayout->addStretch();connect(manage,&QPushButton::clicked,this,[this]{manageVariables();});variableScroll->setWidget(variableBody);variableDock->setWidget(variableScroll);addDockWidget(Qt::LeftDockWidgetArea,variableDock);variableDock->hide();rebuildVariables();
+        auto *openVariables=new QPushButton("Open variable editor…");form->addRow(openVariables);connect(openVariables,&QPushButton::clicked,this,[this]{variableDock->show();variableDock->raise();});
         exponent=number(-100,100);bailout=number(.001,1e9);form->addRow("Exponent p",exponent);form->addRow("Escape radius",bailout);
         iterations=new QSpinBox;iterations->setRange(16,10000);iterations->setSingleStep(100);iterations->setKeyboardTracking(false);form->addRow("Iterations",iterations);
         palette=new QComboBox;palette->addItems({"Spectrum","Ember","Ocean","Monochrome","White / Colour / Black","Custom gradient"});form->addRow("Palette",palette);frequency=number(.00001,10);frequency->setSingleStep(.005);phase=number(-100,100);phase->setSingleStep(.05);form->addRow("Colour frequency",frequency);form->addRow("Colour phase",phase);smoothing=number(0,1,3);smoothing->setSingleStep(.1);smoothing->setToolTip("0: integer escape bands; 1: continuous escape-time colouring. Most accurate for polynomial escape formulas with p > 1.");form->addRow("Colour smoothing",smoothing);
@@ -453,15 +456,17 @@ public:
         coordinates=new QLabel("Click a point to inspect its complex coordinate");statusBar()->addWidget(coordinates,1);
         for(auto *v:{exponent,bailout,frequency,phase,smoothing})connect(v,&QDoubleSpinBox::valueChanged,this,[this]{apply();});
         connect(iterations,&QSpinBox::valueChanged,this,[this]{apply();});connect(palette,&QComboBox::currentIndexChanged,this,[this]{apply();});
-        bindView(left);bindView(right);load();initGradients();setupTools();QTimer::singleShot(0,this,[this]{balance();});
+        bindView(left);load();initGradients();setupTools();QTimer::singleShot(0,this,[this]{balance();});
     }
     bool smoke(){
+        bool defaults=views.size()==1&&active()->settings.iterations==128&&!active()->settings.names.contains("a")&&!active()->settings.names.contains("b");
+        splitView(Qt::Horizontal);right=views.last();left->settings.names={"a","b","c",""};right->settings.names=left->settings.names;target->setCurrentIndex(0);load();
         auto *realTest=new QDoubleSpinBox;realTest->setRange(-10,10);realTest->setDecimals(8);
         auto *integerTest=new QSpinBox;integerTest->setRange(16,10000);
         NumericSlider realSlider(realTest),integerSlider(integerTest);
-        bool ok=realSlider.test()&&integerSlider.test()&&left->check()&&right->check();
+        bool ok=defaults&&realSlider.test()&&integerSlider.test()&&left->check()&&right->check();
         for(const QString &s:{QString("z[n]^p+c"),QString("abs(z[n])^p+c"),QString("conj(z[n])^p+c"),QString("sin(z[n])*a+c"),QString("z[n]-(z[n]^3-1)/(3*z[n]^2)+c"),QString("exp(z[n])+log(c)+cos(z[n])+norm(b)+i+pi+n")}){left->settings.equation=s;ok=left->apply()&&ok;}
-        target->setCurrentIndex(0);left->settings=Settings();left->settings.equation="conj(z[n])^p+c+a";load();
+        target->setCurrentIndex(0);left->settings=Settings();left->settings.names={"a","b","c",""};left->settings.equation="conj(z[n])^p+c+a";load();
         ok=makeJulia(left,right)&&ok;
         ok=ok&&right->settings.equation==left->settings.equation&&right->settings.variables[3].source==Pixel&&right->settings.variables[2].source==Mouse;
         picked(right,-.75,.1,Qt::NoModifier);ok=ok&&right->settings.variables[2].real==-.75;
@@ -498,7 +503,7 @@ public:
         splitView(Qt::Horizontal);View *routeSource=views.first(),*routeTarget=views.last();routes<<PickRoute{routeSource->property("number").toInt(),routeTarget->property("number").toInt(),1,int(Qt::AltModifier)};picked(routeSource,.42,-.13,Qt::AltModifier);ok=ok&&routeTarget->settings.variables[1].real==.42;
         for(int mode:{int(Constant),int(Mouse),int(Pixel)}){routeTarget->settings.variables[1].source=mode;picked(routeSource,.31,.27,Qt::AltModifier);ok=ok&&routeTarget->settings.variables[1].source==(mode==Pixel?Constant:mode);}
         routeTarget->settings.variables[1].source=Constant;picked(routeSource,.42,-.13,Qt::AltModifier);picked(routeTarget,.99,.88,Qt::ControlModifier);ok=ok&&routeTarget->settings.variables[1].real==.42;
-        routes.last().variable=3;routeTarget->settings.variables[3].source=Expression;routeTarget->settings.variables[3].equation="a+b";picked(routeSource,.2,.1,Qt::AltModifier);ok=ok&&routeTarget->settings.variables[3].source==Expression;routes.last().variable=1;
+        routes.last().variable=3;routeTarget->settings.variables[3].source=Expression;routeTarget->settings.variables[3].equation="c+1";picked(routeSource,.2,.1,Qt::AltModifier);ok=ok&&routeTarget->settings.variables[3].source==Expression;routes.last().variable=1;
         auto multi=snapshot();ok=restore(multi)&&ok;ok=ok&&views.size()==2&&routes.size()==1&&tracks.size()==2;
         QSaveFile workspace(temporary.filePath("workspace.json"));ok=workspace.open(QIODevice::WriteOnly)&&ok;workspace.write(QJsonDocument(multi).toJson());ok=workspace.commit()&&ok;
         active()->renderImage({64,64});
@@ -518,7 +523,7 @@ public:
         active()->settings.palette=5;active()->settings.gradientName=gradientLibrary.last().toObject()["name"].toString();active()->settings.gradient=gradientLibrary.last().toObject()["stops"].toArray();active()->settings.frequency=.12;active()->settings.phase=.34;active()->settings.smoothing=.56;
         Settings appearance=active()->settings;
         for(int presetIndex=0;presetIndex<6;++presetIndex){choosePreset(presetIndex);const auto &s=active()->settings;ok=ok&&s.palette==appearance.palette&&s.gradientName==appearance.gradientName&&s.gradient==appearance.gradient&&s.frequency==appearance.frequency&&s.phase==appearance.phase&&s.smoothing==appearance.smoothing;}
-        active()->settings.names.append("custom_parameter");active()->settings.variables.append(Variable{Constant,.25,.1,"0",int(Qt::ControlModifier|Qt::AltModifier)});active()->settings.equation="z[n]^2+custom_parameter+floor(a)+ceil(b)+(c%2)";ok=active()->apply()&&ok;ok=readSettings(settingsJson(active()->settings)).names.contains("custom_parameter")&&ok;
+        active()->settings.names.append("custom_parameter");active()->settings.variables.append(Variable{Constant,.25,.1,"0",int(Qt::ControlModifier|Qt::AltModifier)});active()->settings.equation="z[n]^2+custom_parameter+floor(c)+ceil(c)+(c%2)";ok=active()->apply()&&ok;ok=readSettings(settingsJson(active()->settings)).names.contains("custom_parameter")&&ok;
         active()->settings.variables.last().source=Mouse;picked(active(),.61,.72,Qt::ControlModifier|Qt::AltModifier);ok=ok&&active()->settings.variables.last().real==.61;
         for(QString invalid:{QString("z"),QString("z_n")}){try{Equation::compile(invalid);ok=false;}catch(const std::exception &){}try{ComplexExpression::evaluate(invalid,[](QString){return std::complex<double>(0);});ok=false;}catch(const std::exception &){}}
         auto rounded=ComplexExpression::evaluate("floor(-1.2+2.8*i)+ceil(1.2-2.8*i)+(-3%2)",[](QString){return std::complex<double>(0);});ok=ok&&std::abs(rounded-std::complex<double>(1,0))<1e-9;
@@ -531,6 +536,8 @@ public:
         Settings seedRoundTrip=readSettings(settingsJson(active()->settings));ok=ok&&seedRoundTrip.negativeHistory.value(-1)==QPointF(100,2);
         auto defaultNegative=ComplexExpression::evaluate("z[-1]",[](QString){return std::complex<double>(0);});ok=ok&&defaultNegative==std::complex<double>(0);
         auto customNegative=ComplexExpression::evaluate("z[-1]+z[0]",[](QString){return std::complex<double>(0);},[](int index){return index<0?std::complex<double>(2,3):std::complex<double>(1,0);});ok=ok&&customNegative==std::complex<double>(3,3);
+        active()->settings=Settings();active()->settings.names.append("other");active()->settings.variables.append(Variable{});auto &matching=active()->settings.variables;matching[2].source=Mouse;matching.last().source=Mouse;matching[2].modifiers=0;matching.last().modifiers=0;load();picked(active(),.25,-.5,Qt::NoModifier);ok=ok&&matching[2].real==.25&&matching.last().real==.25&&matching.last().imag==-.5;
+        variableDock->show();variableDock->setFloating(true);ok=ok&&variableDock->isFloating();variableDock->setFloating(false);ok=ok&&!variableDock->isFloating();variableDock->hide();
         try{Equation::compile("z; invalid");ok=false;}catch(const std::exception &){}
         if(!ok)qWarning()<<"Playground regression check failed"<<error->text()<<active()->lastError;
         return ok;
